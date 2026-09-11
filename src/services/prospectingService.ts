@@ -20,10 +20,10 @@ export interface ProspectFilters {
   city: string;
   state: string;
   keywords: string;
-  revenueMin?: number;
-  revenueMax?: number;
-  employeesMin?: number;
-  employeesMax?: number;
+  revenueMin: number | null;
+  revenueMax: number | null;
+  employeesMin: number | null;
+  employeesMax: number | null;
   requiresWebsite: boolean;
   requiresInstagram: boolean;
 }
@@ -54,10 +54,10 @@ export function icpToFilters(icp: Icp): ProspectFilters {
     city: icp.city ?? "",
     state: icp.state ?? "",
     keywords: (icp.keywords ?? []).join(", "),
-    revenueMin: icp.revenue_min ?? undefined,
-    revenueMax: icp.revenue_max ?? undefined,
-    employeesMin: icp.employees_min ?? undefined,
-    employeesMax: icp.employees_max ?? undefined,
+    revenueMin: icp.revenue_min,
+    revenueMax: icp.revenue_max,
+    employeesMin: icp.employees_min,
+    employeesMax: icp.employees_max,
     requiresWebsite: icp.requires_website,
     requiresInstagram: icp.requires_instagram,
   };
