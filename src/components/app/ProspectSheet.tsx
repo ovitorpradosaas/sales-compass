@@ -41,7 +41,7 @@ export function ProspectSheet({ prospect, onOpenChange }: ProspectSheetProps) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  async function save() {
+  const save = async () => {
     setSaving(true);
     const { error } = await supabase
       .from("prospects")
@@ -64,19 +64,22 @@ export function ProspectSheet({ prospect, onOpenChange }: ProspectSheetProps) {
       })
       .eq("id", prospect.id);
     setSaving(false);
-    if (error) return toast.error(error.message);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
     invalidate(["prospects", "activities"]);
     toast.success("Ficha atualizada.");
-  }
+  };
 
-  async function toggleTag(tagId: string, active: boolean) {
+  const toggleTag = async (tagId: string, active: boolean) => {
     if (active) {
       await supabase.from("prospect_tags").delete().eq("prospect_id", prospect.id).eq("tag_id", tagId);
     } else {
       await supabase.from("prospect_tags").insert({ prospect_id: prospect.id, tag_id: tagId });
     }
     invalidate(["prospect_tags"]);
-  }
+  };
 
   const localDateTime = form.next_action_at
     ? new Date(form.next_action_at).toISOString().slice(0, 16)
