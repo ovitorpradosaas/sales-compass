@@ -93,6 +93,7 @@ export const searchGooglePlaces = createServerFn({ method: "POST" }).validator(P
       const keywords = data.keywords.split(",").map(normalize).filter(Boolean);
       if (data.requiresWebsite && !place.websiteUri) continue;
       const web = await inspectWebsite(place.websiteUri ?? null);
+      if (data.requiresInstagram && !web.instagram) continue;
       const candidate: GoogleProspectCandidate = {
         externalId: place.id, company, niche, city: address.city, state: address.state,
         website: place.websiteUri ?? null, instagram: web.instagram, phone, whatsapp: phone,
