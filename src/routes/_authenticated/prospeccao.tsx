@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -34,6 +34,78 @@ const EMPTY: ProspectFilters = {
   requiresWebsite: false, requiresInstagram: false, qualificationRules: [],
 };
 
+type ExistingProspect = {
+  company: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  website: string | null;
+  city: string | null;
+  state: string | null;
+};
+
+function normalizeText(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizePhone(value: string | null | undefined) {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+function normalizeHost(value: string | null | undefined) {
+  if (!value) return "";
+  try {
+    const url = value.includes("://") ? new URL(value) : new URL(`https://${value}`);
+    return url.hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return normalizeText(value).replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+  }
+}
+
+function prospectKey(prospect: Pick<ProspectCandidate, "phone" | "whatsapp" | "website" | "company" | "city" | "state">) {
+  const phones = [normalizePhone(prospect.phone), normalizePhone(prospect.whatsapp)].filter(Boolean);
+  const host = normalizeHost(prospect.website);
+  const companyLocation = [normalizeText(prospect.company), normalizeText(prospect.city), normalizeText(prospect.state)]
+    .filter(Boolean)
+    .join("|");
+  return { phones, host, companyLocation };
+}
+
+function conflictsWithExisting(candidate: ProspectCandidate, existing: ExistingProspect | ProspectCandidate) {
+  const candidatePhones = [normalizePhone(candidate.phone), normalizePhone(candidate.whatsapp)].filter(Boolean);
+  const existingPhones = [normalizePhone(existing.phone), normalizePhone(existing.whatsapp)].filter(Boolean);
+  if (candidatePhones.some((phone) => existingPhones.includes(phone))) return true;
+
+  const candidateHost = normalizeHost(candidate.website);
+  if (candidateHost && candidateHost === normalizeHost(existing.website)) return true;
+
+  const candidateCompanyLocation = [normalizeText(candidate.company), normalizeText(candidate.city), normalizeText(candidate.state)]
+    .filter(Boolean)
+    .join("|");
+  const existingCompanyLocation = [normalizeText(existing.company), normalizeText(existing.city), normalizeText(existing.state)]
+    .filter(Boolean)
+    .join("|");
+  return Boolean(candidateCompanyLocation && candidateCompanyLocation === existingCompanyLocation);
+}
+
+function dedupeResults(results: ProspectCandidate[]) {
+  const seenPhones = new Set<string>();
+  const seenHosts = new Set<string>();
+  const seenCompanyLocations = new Set<string>();
+
+  return results.filter((candidate) => {
+    const { phones, host, companyLocation } = prospectKey(candidate);
+    const duplicate = phones.some((phone) => seenPhones.has(phone))
+      || Boolean(host && seenHosts.has(host))
+      || Boolean(companyLocation && seenCompanyLocations.has(companyLocation));
+
+    if (duplicate) return false;
+    phones.forEach((phone) => seenPhones.add(phone));
+    if (host) seenHosts.add(host);
+    if (companyLocation) seenCompanyLocations.add(companyLocation);
+    return true;
+  });
+}
+
 function ProspeccaoPage() {
   const { data: icps = [] } = useIcps();
   const { data: criteria = [] } = useCriteria();
@@ -50,24 +122,93 @@ function ProspeccaoPage() {
   const applyIcp = (id: string) => { setIcpId(id); const icp = icps.find((i) => i.id === id); setFilters(icp ? icpToFilters(icp) : EMPTY); };
   const run = async () => {
     setLoading(true);
-    try { const found = await searchProspects(filters, criteria); setResults(found); setSelected(new Set()); if (found.length === 0) toast.info("Nenhum prospect com esses filtros."); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Falha na busca."); }
-    finally { setLoading(false); }
+    try {
+      const found = dedupeResults(await searchProspects(filters, criteria));
+      setResults(found);
+      setSelected(new Set());
+      if (found.length === 0) toast.info("Nenhum prospect com esses filtros.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha na busca.");
+    } finally {
+      setLoading(false);
+    }
   };
-  const toggle = (id: string) => setSelected((s) => { const next = new Set(s); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  const chosen = (results ?? []).filter((r) => selected.has(r.externalId));
+  const toggle = (id: string) => setSelected((s) => {
+    const next = new Set(s);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allSelected = Boolean(results?.length) && selected.size === results!.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  const toggleAll = () => setSelected((current) => {
+    if (!results?.length) return new Set();
+    return current.size === results.length ? new Set() : new Set(results.map((result) => result.externalId));
+  });
+  const chosen = useMemo(() => (results ?? []).filter((r) => selected.has(r.externalId)), [results, selected]);
+
   const save = async (toPipeline: boolean) => {
     if (chosen.length === 0) return;
     setSaving(true);
     try {
-      const userId = await currentUserId(); const firstStage = stages[0];
-      const rows = chosen.map((c) => ({ user_id: userId, company: c.company, niche: c.niche, city: c.city, state: c.state, website: c.website, instagram: c.instagram, phone: c.phone, whatsapp: c.whatsapp, email: c.email, contact_name: c.contact_name, contact_role: c.contact_role, revenue: c.revenue, employees: c.employees, icp_score: c.icp_score, icp_id: icpId === "manual" ? null : icpId, source: c.source, status: toPipeline ? "contatar" : "novo", stage_id: toPipeline ? (firstStage?.id ?? null) : null }));
+      const userId = await currentUserId();
+      const firstStage = stages[0];
+      const { data: existing, error: existingError } = await supabase
+        .from("prospects")
+        .select("company,phone,whatsapp,website,city,state")
+        .eq("user_id", userId);
+      if (existingError) throw new Error(existingError.message);
+
+      const fresh: ProspectCandidate[] = [];
+      for (const candidate of chosen) {
+        const duplicate = (existing ?? []).some((prospect) => conflictsWithExisting(candidate, prospect as ExistingProspect))
+          || fresh.some((savedCandidate) => conflictsWithExisting(candidate, savedCandidate));
+        if (!duplicate) fresh.push(candidate);
+      }
+
+      if (fresh.length === 0) {
+        toast.info("Todos os prospects selecionados já estão na sua base ou são duplicados entre si.");
+        return;
+      }
+
+      const rows = fresh.map((c) => ({
+        user_id: userId,
+        company: c.company,
+        niche: c.niche,
+        city: c.city,
+        state: c.state,
+        website: c.website,
+        instagram: c.instagram,
+        phone: c.phone,
+        whatsapp: c.whatsapp,
+        email: c.email,
+        contact_name: c.contact_name,
+        contact_role: c.contact_role,
+        revenue: c.revenue,
+        employees: c.employees,
+        icp_score: c.icp_score,
+        icp_id: icpId === "manual" ? null : icpId,
+        source: c.source,
+        status: toPipeline ? "contatar" : "novo",
+        stage_id: toPipeline ? (firstStage?.id ?? null) : null,
+      }));
+
       const { data, error } = await supabase.from("prospects").insert(rows).select("id");
       if (error) throw new Error(error.message);
-      await supabase.from("activities").insert((data ?? []).map((p) => ({ user_id: userId, prospect_id: p.id, type: "prospect_encontrado", description: toPipeline ? "Adicionado ao pipeline pela busca" : "Adicionado à base pela busca" })));
-      invalidate(["prospects", "activities"]); toast.success(`${rows.length} prospect(s) salvo(s).`); setSelected(new Set());
-    } catch (err) { toast.error(err instanceof Error ? err.message : "Não foi possível salvar."); }
-    finally { setSaving(false); }
+      await supabase.from("activities").insert((data ?? []).map((p) => ({
+        user_id: userId,
+        prospect_id: p.id,
+        type: "prospect_encontrado",
+        description: toPipeline ? "Adicionado ao pipeline pela busca" : "Adicionado à base pela busca",
+      })));
+      invalidate(["prospects", "activities"]);
+      const skipped = chosen.length - rows.length;
+      toast.success(`${rows.length} prospect(s) salvo(s)${skipped > 0 ? ` · ${skipped} ignorado(s) por duplicidade` : ""}.`);
+      setSelected(new Set());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível salvar.");
+    } finally {
+      setSaving(false);
+    }
   };
   const exportCsv = () => {
     const list = chosen.length > 0 ? chosen : (results ?? []); if (list.length === 0) return;
@@ -86,7 +227,7 @@ function ProspeccaoPage() {
         <div className="md:col-span-2"><Text label="Palavras-chave (separadas por vírgula)" value={filters.keywords} onChange={(v) => set("keywords", v)} /></div>
         <div className="flex items-end gap-6 md:col-span-2"><label className="flex items-center gap-2 text-sm"><Checkbox checked={filters.requiresWebsite} onCheckedChange={(c) => set("requiresWebsite", c === true)} />Tem site</label><label className="flex items-center gap-2 text-sm"><Checkbox checked={filters.requiresInstagram} onCheckedChange={(c) => set("requiresInstagram", c === true)} />Tem Instagram</label></div>
       </CardContent></Card>
-      {results && <><div className="flex flex-wrap items-center gap-2"><span className="text-sm text-muted-foreground">{results.length} resultado(s) · {selected.size} selecionado(s)</span><div className="ml-auto flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={saving || selected.size === 0} onClick={() => void save(false)}>Adicionar aos prospects</Button><Button size="sm" disabled={saving || selected.size === 0} onClick={() => void save(true)}>Adicionar ao pipeline</Button><Button size="sm" variant="ghost" onClick={exportCsv}>Exportar CSV</Button></div></div><Card className="glass overflow-x-auto"><Table><TableHeader><TableRow><TableHead className="w-10"></TableHead><TableHead>Empresa</TableHead><TableHead>Nicho</TableHead><TableHead>Cidade</TableHead><TableHead>UF</TableHead><TableHead>Site</TableHead><TableHead>Instagram</TableHead><TableHead>Telefone</TableHead><TableHead>Contato</TableHead><TableHead>Cargo</TableHead><TableHead>Score</TableHead></TableRow></TableHeader><TableBody>{results.map((r) => <TableRow key={r.externalId}><TableCell><Checkbox checked={selected.has(r.externalId)} onCheckedChange={() => toggle(r.externalId)} aria-label={`Selecionar ${r.company}`} /></TableCell><TableCell className="font-medium">{r.company}</TableCell><TableCell>{r.niche}</TableCell><TableCell>{r.city}</TableCell><TableCell>{r.state}</TableCell><TableCell className="max-w-40 truncate text-muted-foreground">{r.website ?? "—"}</TableCell><TableCell className="text-muted-foreground">{r.instagram ?? "—"}</TableCell><TableCell className="text-muted-foreground">{r.phone ?? "—"}</TableCell><TableCell>{r.contact_name ?? "—"}</TableCell><TableCell className="text-muted-foreground">{r.contact_role ?? "—"}</TableCell><TableCell><ScoreBadge score={r.icp_score} /></TableCell></TableRow>)}</TableBody></Table></Card></>}
+      {results && <><div className="flex flex-wrap items-center gap-2"><span className="text-sm text-muted-foreground">{results.length} resultado(s) · {selected.size} selecionado(s)</span><div className="ml-auto flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={saving || selected.size === 0} onClick={() => void save(false)}>Adicionar aos prospects</Button><Button size="sm" disabled={saving || selected.size === 0} onClick={() => void save(true)}>Adicionar ao pipeline</Button><Button size="sm" variant="ghost" onClick={exportCsv}>Exportar CSV</Button></div></div><Card className="glass overflow-x-auto"><Table><TableHeader><TableRow><TableHead className="w-10"><Checkbox checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={toggleAll} aria-label="Selecionar todos os prospects" /></TableHead><TableHead>Empresa</TableHead><TableHead>Nicho</TableHead><TableHead>Cidade</TableHead><TableHead>UF</TableHead><TableHead>Site</TableHead><TableHead>Instagram</TableHead><TableHead>Telefone</TableHead><TableHead>Contato</TableHead><TableHead>Cargo</TableHead><TableHead>Score</TableHead></TableRow></TableHeader><TableBody>{results.map((r) => <TableRow key={r.externalId}><TableCell><Checkbox checked={selected.has(r.externalId)} onCheckedChange={() => toggle(r.externalId)} aria-label={`Selecionar ${r.company}`} /></TableCell><TableCell className="font-medium">{r.company}</TableCell><TableCell>{r.niche}</TableCell><TableCell>{r.city}</TableCell><TableCell>{r.state}</TableCell><TableCell className="max-w-40 truncate text-muted-foreground">{r.website ?? "—"}</TableCell><TableCell className="text-muted-foreground">{r.instagram ?? "—"}</TableCell><TableCell className="text-muted-foreground">{r.phone ?? "—"}</TableCell><TableCell>{r.contact_name ?? "—"}</TableCell><TableCell className="text-muted-foreground">{r.contact_role ?? "—"}</TableCell><TableCell><ScoreBadge score={r.icp_score} /></TableCell></TableRow>)}</TableBody></Table></Card></>}
     </div>
   );
 }
