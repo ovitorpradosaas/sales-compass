@@ -1,6 +1,33 @@
 import type { Icp, IcpCriterion } from "@/lib/types";
 import { searchGooglePlaces, type GoogleProspectCandidate } from "./prospecting.functions";
 
+export type QualificationSignal = "website" | "landing_page" | "instagram" | "meta_ads" | "google_ads";
+export type QualificationOperator = "has" | "not_has";
+export type QualificationMode = "required" | "preferred";
+
+export interface IcpQualificationRule {
+  signal: QualificationSignal;
+  operator: QualificationOperator;
+  mode: QualificationMode;
+  weight: number;
+}
+
+export const DEFAULT_QUALIFICATION_RULES: IcpQualificationRule[] = [];
+
+export function parseQualificationRules(value: string | null | undefined): IcpQualificationRule[] {
+  if (!value) return DEFAULT_QUALIFICATION_RULES;
+  try {
+    const parsed = JSON.parse(value) as { qualificationRules?: IcpQualificationRule[] };
+    return Array.isArray(parsed.qualificationRules) ? parsed.qualificationRules : DEFAULT_QUALIFICATION_RULES;
+  } catch {
+    return DEFAULT_QUALIFICATION_RULES;
+  }
+}
+
+export function serializeQualificationRules(rules: IcpQualificationRule[], notes?: string | null) {
+  return JSON.stringify({ qualificationRules: rules, notes: notes ?? "" });
+}
+
 export interface ProspectFilters {
   niche: string;
   city: string;
@@ -12,6 +39,7 @@ export interface ProspectFilters {
   employeesMax: number | null;
   requiresWebsite: boolean;
   requiresInstagram: boolean;
+  qualificationRules: IcpQualificationRule[];
 }
 
 export interface ProspectCandidate extends GoogleProspectCandidate {
@@ -30,6 +58,7 @@ export function icpToFilters(icp: Icp): ProspectFilters {
     employeesMax: icp.employees_max,
     requiresWebsite: icp.requires_website,
     requiresInstagram: icp.requires_instagram,
+    qualificationRules: parseQualificationRules(icp.other_criteria),
   };
 }
 
@@ -56,11 +85,19 @@ export function computeIcpScore(
     keyword: candidate.keywordHit,
   };
 
-  const total = criteria.reduce(
-    (sum, c) => (checks[c.key] ? sum + Number(c.weight) : sum),
-    0,
-  );
-  return Math.max(0, Math.min(100, Math.round(total)));
+  for (const rule of filters.qualificationRules) {
+    const value = candidate.digitalSignals?.[rule.signal];
+    if (value != null) checks[rule.signal] = rule.operator === "has" ? value : !value;
+  }
+
+  const total = criteria.reduce((sum, c) => (checks[c.key] ? sum + Number(c.weight) : sum), 0);
+  const ruleBonus = filters.qualificationRules.reduce((sum, rule) => {
+    const value = candidate.digitalSignals?.[rule.signal];
+    if (rule.mode !== "preferred" || value == null) return sum;
+    return rule.operator === "has" ? sum + (value ? rule.weight : 0) : sum + (!value ? rule.weight : 0);
+  }, 0);
+
+  return Math.max(0, Math.min(100, Math.round(total + ruleBonus)));
 }
 
 export async function searchProspects(
@@ -68,11 +105,7 @@ export async function searchProspects(
   criteria: IcpCriterion[],
 ): Promise<ProspectCandidate[]> {
   const candidates = await searchGooglePlaces({ data: filters });
-
   return candidates
-    .map((candidate) => ({
-      ...candidate,
-      icp_score: computeIcpScore(candidate, filters, criteria),
-    }))
+    .map((candidate) => ({ ...candidate, icp_score: computeIcpScore(candidate, filters, criteria) }))
     .sort((a, b) => b.icp_score - a.icp_score);
 }
