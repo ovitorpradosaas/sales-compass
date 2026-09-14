@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Bell, Contact, Kanban, LayoutDashboard, ListChecks, LogOut, MessageCircle, Search, Settings, Target, Telescope } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useProfile, useProspects } from "@/lib/queries";
+import { processDueFollowups } from "@/services/followupService";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -30,6 +31,28 @@ export function AppShell({ children }: AppShellProps) {
   const { data: prospects = [] } = useProspects();
   const [term, setTerm] = useState("");
   const pending = prospects.filter((p) => p.next_action_at && new Date(p.next_action_at) <= new Date()).length;
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      if (!active) return;
+      try {
+        const count = await processDueFollowups();
+        if (count > 0) {
+          await queryClient.invalidateQueries({ queryKey: ["prospects"] });
+          await queryClient.invalidateQueries({ queryKey: ["scheduled_messages"] });
+          await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          await queryClient.invalidateQueries({ queryKey: ["activities"] });
+        }
+      } catch {
+        // Follow-up execution stays non-blocking for the rest of the CRM shell.
+      }
+    };
+    void run();
+    const timer = window.setInterval(() => void run(), 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [queryClient]);
+
   async function handleSignOut() { await queryClient.cancelQueries(); queryClient.clear(); await supabase.auth.signOut(); navigate({ to: "/auth", replace: true }); }
   const initials = (profile?.full_name ?? profile?.email ?? "PF").split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
   return <div className="min-h-screen bg-background">
