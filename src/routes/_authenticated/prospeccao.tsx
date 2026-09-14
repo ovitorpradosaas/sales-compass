@@ -53,6 +53,51 @@ const EMPTY: ProspectFilters = {
   requiresInstagram: false,
 };
 
+function normalizeKey(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function normalizePhone(value: string | null | undefined) {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+function normalizeWebsite(value: string | null | undefined) {
+  if (!value) return "";
+  try {
+    const url = new URL(value.startsWith("http") ? value : `https://${value}`);
+    return url.hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return normalizeKey(value).replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+  }
+}
+
+function candidateKeys(candidate: ProspectCandidate) {
+  return {
+    phone: normalizePhone(candidate.phone || candidate.whatsapp),
+    website: normalizeWebsite(candidate.website),
+    company: normalizeKey(candidate.company),
+    city: normalizeKey(candidate.city),
+    state: normalizeKey(candidate.state),
+  };
+}
+
+function prospectMatchesCandidate(prospect: Record<string, unknown>, candidate: ProspectCandidate) {
+  const candidateKey = candidateKeys(candidate);
+  const phone = normalizePhone(String(prospect.phone || prospect.whatsapp || ""));
+  const website = normalizeWebsite(String(prospect.website || ""));
+  const company = normalizeKey(String(prospect.company || ""));
+  const city = normalizeKey(String(prospect.city || ""));
+  const state = normalizeKey(String(prospect.state || ""));
+
+  if (candidateKey.phone && phone && candidateKey.phone === phone) return true;
+  if (candidateKey.website && website && candidateKey.website === website) return true;
+  return Boolean(candidateKey.company && company === candidateKey.company && (!candidateKey.city || !city || candidateKey.city === city) && (!candidateKey.state || !state || candidateKey.state === state));
+}
+
 function ProspeccaoPage() {
   const { data: icps = [] } = useIcps();
   const { data: criteria = [] } = useCriteria();
@@ -97,6 +142,13 @@ function ProspeccaoPage() {
       return next;
     });
 
+  const toggleAll = () => {
+    if (!results?.length) return;
+    setSelected((current) =>
+      current.size === results.length ? new Set() : new Set(results.map((r) => r.externalId)),
+    );
+  };
+
   const chosen = (results ?? []).filter((r) => selected.has(r.externalId));
 
   const save = async (toPipeline: boolean) => {
@@ -105,7 +157,25 @@ function ProspeccaoPage() {
     try {
       const userId = await currentUserId();
       const firstStage = stages[0];
-      const rows = chosen.map((c) => ({
+      const { data: existing = [], error: existingError } = await supabase
+        .from("prospects")
+        .select("id,company,city,state,website,phone,whatsapp")
+        .eq("user_id", userId);
+      if (existingError) throw new Error(existingError.message);
+
+      const duplicateIds = new Set(
+        chosen
+          .filter((candidate) => existing.some((prospect) => prospectMatchesCandidate(prospect, candidate)))
+          .map((candidate) => candidate.externalId),
+      );
+      const fresh = chosen.filter((candidate) => !duplicateIds.has(candidate.externalId));
+
+      if (fresh.length === 0) {
+        toast.info("Todos os prospects selecionados já estão na sua base.");
+        return;
+      }
+
+      const rows = fresh.map((c) => ({
         user_id: userId,
         company: c.company,
         niche: c.niche,
@@ -137,7 +207,8 @@ function ProspeccaoPage() {
         })),
       );
       invalidate(["prospects", "activities"]);
-      toast.success(`${rows.length} prospect(s) salvo(s).`);
+      const duplicateMessage = duplicateIds.size > 0 ? ` ${duplicateIds.size} já estava(m) na base.` : "";
+      toast.success(`${rows.length} prospect(s) salvo(s).${duplicateMessage}`);
       setSelected(new Set());
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Não foi possível salvar.");
@@ -206,17 +277,11 @@ function ProspeccaoPage() {
           </div>
           <div className="flex items-end gap-6 md:col-span-2">
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={filters.requiresWebsite}
-                onCheckedChange={(c) => set("requiresWebsite", c === true)}
-              />
+              <Checkbox checked={filters.requiresWebsite} onCheckedChange={(c) => set("requiresWebsite", c === true)} />
               Tem site
             </label>
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={filters.requiresInstagram}
-                onCheckedChange={(c) => set("requiresInstagram", c === true)}
-              />
+              <Checkbox checked={filters.requiresInstagram} onCheckedChange={(c) => set("requiresInstagram", c === true)} />
               Tem Instagram
             </label>
           </div>
@@ -244,7 +309,13 @@ function ProspeccaoPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={results.length > 0 && selected.size === results.length}
+                      onCheckedChange={toggleAll}
+                      aria-label="Selecionar todos os resultados"
+                    />
+                  </TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Nicho</TableHead>
                   <TableHead>Cidade</TableHead>
@@ -261,11 +332,7 @@ function ProspeccaoPage() {
                 {results.map((r) => (
                   <TableRow key={r.externalId}>
                     <TableCell>
-                      <Checkbox
-                        checked={selected.has(r.externalId)}
-                        onCheckedChange={() => toggle(r.externalId)}
-                        aria-label={`Selecionar ${r.company}`}
-                      />
+                      <Checkbox checked={selected.has(r.externalId)} onCheckedChange={() => toggle(r.externalId)} aria-label={`Selecionar ${r.company}`} />
                     </TableCell>
                     <TableCell className="font-medium">{r.company}</TableCell>
                     <TableCell>{r.niche}</TableCell>
@@ -301,11 +368,7 @@ function Num({ label, value, onChange }: { label: string; value: number | null; 
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
-      <Input
-        type="number"
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-      />
+      <Input type="number" value={value ?? ""} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))} />
     </div>
   );
 }
