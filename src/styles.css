@@ -163,3 +163,10 @@
   backdrop-filter: blur(20px);
   border: 1px solid color-mix(in oklab, var(--color-card) 80%, transparent);
 }
+
+/* Remove the platform branding widget from every page. */
+#lovable-badge {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
