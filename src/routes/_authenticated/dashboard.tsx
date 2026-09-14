@@ -33,7 +33,7 @@ function DashboardPage() {
   const meetings = byStatus("reuniao");
   const pending = prospects.filter((p) => p.next_action_at && new Date(p.next_action_at) <= now);
   const upcomingSchedules = scheduled
-    .filter((s) => s.status === "pendente")
+    .filter((s) => s.status === "agendada" && new Date(s.scheduled_at) >= now)
     .slice(0, 5);
   const unread = conversations.filter((c) => c.unread_count > 0);
 
@@ -72,74 +72,33 @@ function DashboardPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <ActionList
-          title="Contatar agora"
-          empty="Nenhum prospect aguardando primeiro contato."
-          items={toContact.slice(0, 6)}
-        />
-        <ActionList
-          title="Respostas aguardando você"
-          empty="Nenhuma resposta pendente."
-          items={replies.slice(0, 6)}
-        />
-        <ActionList
-          title="Follow-ups vencidos"
-          empty="Você está em dia com os follow-ups."
-          items={pending.slice(0, 6)}
-        />
-        <ActionList
-          title="Reuniões próximas"
-          empty="Nenhuma reunião marcada."
-          items={meetings.slice(0, 6)}
-        />
+        <ActionList title="Contatar agora" empty="Nenhum prospect aguardando primeiro contato." items={toContact.slice(0, 6)} />
+        <ActionList title="Respostas aguardando você" empty="Nenhuma resposta pendente." items={replies.slice(0, 6)} />
+        <ActionList title="Follow-ups vencidos" empty="Você está em dia com os follow-ups." items={pending.slice(0, 6)} />
+        <ActionList title="Reuniões próximas" empty="Nenhuma reunião marcada." items={meetings.slice(0, 6)} />
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
         <Card className="glass">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Resumo do funil</CardTitle>
-          </CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Resumo do funil</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {stages.map((s) => {
               const count = prospects.filter((p) => p.stage_id === s.id).length;
-              return (
-                <div key={s.id} className="flex items-center gap-3 text-sm">
-                  <span className="size-2 rounded-full" style={{ background: s.color }} aria-hidden />
-                  <span className="flex-1 truncate">{s.name}</span>
-                  <span className="tabular-nums text-muted-foreground">{count}</span>
-                </div>
-              );
+              return <div key={s.id} className="flex items-center gap-3 text-sm"><span className="size-2 rounded-full" style={{ background: s.color }} aria-hidden /><span className="flex-1 truncate">{s.name}</span><span className="tabular-nums text-muted-foreground">{count}</span></div>;
             })}
-            <Link to="/pipeline" className="inline-block pt-2 text-sm font-medium text-primary hover:underline">
-              Abrir pipeline
-            </Link>
+            <Link to="/pipeline" className="inline-block pt-2 text-sm font-medium text-primary hover:underline">Abrir pipeline</Link>
           </CardContent>
         </Card>
 
         <Card className="glass">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Mensagens agendadas</CardTitle>
-          </CardHeader>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Mensagens agendadas</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {upcomingSchedules.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nada agendado.</p>
-            )}
+            {upcomingSchedules.length === 0 && <p className="text-sm text-muted-foreground">Nada agendado.</p>}
             {upcomingSchedules.map((s) => {
               const p = prospects.find((x) => x.id === s.prospect_id);
-              return (
-                <div key={s.id} className="flex items-center gap-3 text-sm">
-                  <span className="flex-1 truncate">{p?.company ?? "Prospect"}</span>
-                  <Badge variant="outline">
-                    {new Date(s.scheduled_at).toLocaleDateString("pt-BR")}
-                  </Badge>
-                </div>
-              );
+              return <div key={s.id} className="flex items-center gap-3 text-sm"><span className="flex-1 truncate">{p?.company ?? "Prospect"}</span><Badge variant="outline">{new Date(s.scheduled_at).toLocaleString("pt-BR")}</Badge></div>;
             })}
-            {unread.length > 0 && (
-              <Link to="/whatsapp" className="inline-block pt-2 text-sm font-medium text-primary hover:underline">
-                {unread.length} conversa(s) não lida(s)
-              </Link>
-            )}
+            {unread.length > 0 && <Link to="/whatsapp" className="inline-block pt-2 text-sm font-medium text-primary hover:underline">{unread.length} conversa(s) não lida(s)</Link>}
           </CardContent>
         </Card>
       </section>
@@ -148,26 +107,5 @@ function DashboardPage() {
 }
 
 function ActionList({ title, items, empty }: { title: string; items: Prospect[]; empty: string }) {
-  return (
-    <Card className="glass">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {items.length === 0 && <p className="text-sm text-muted-foreground">{empty}</p>}
-        {items.map((p) => (
-          <div key={p.id} className="flex items-center gap-3 rounded-lg px-1 py-1.5 text-sm">
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium">{p.company}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {p.contact_name ?? "sem contato"}
-                {p.next_action ? ` · ${p.next_action}` : ""}
-              </p>
-            </div>
-            <ScoreBadge score={p.icp_score} />
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
+  return <Card className="glass"><CardHeader className="pb-2"><CardTitle className="text-sm">{title}</CardTitle></CardHeader><CardContent className="space-y-2">{items.length === 0 && <p className="text-sm text-muted-foreground">{empty}</p>}{items.map((p) => <div key={p.id} className="flex items-center gap-3 rounded-lg px-1 py-1.5 text-sm"><div className="min-w-0 flex-1"><p className="truncate font-medium">{p.company}</p><p className="truncate text-xs text-muted-foreground">{p.contact_name ?? "sem contato"}{p.next_action ? ` · ${p.next_action}` : ""}</p></div><ScoreBadge score={p.icp_score} /></div>)}</CardContent></Card>;
 }
