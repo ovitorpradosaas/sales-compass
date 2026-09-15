@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
+import { Check, Eye, EyeOff, KeyRound, LockKeyhole, LogOut, UserRound } from "lucide-react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Check, Eye, EyeOff, KeyRound, LockKeyhole, LogOut, UserRound, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { WhatsappConnectionCard } from "@/components/app/WhatsappConnectionCard";
 import { useInvalidate, useProfile } from "@/lib/queries";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
@@ -108,12 +108,9 @@ function SettingsPage() {
             <div className="space-y-2"><Label htmlFor="google-maps-api-key">Google Maps API Key</Label><div className="flex gap-2"><div className="relative min-w-0 flex-1"><Input id="google-maps-api-key" type={showApiKey ? "text" : "password"} value={googleMapsApiKey} onChange={(e) => setGoogleMapsApiKey(e.target.value)} placeholder="Cole sua API Key aqui" className="pr-10" autoComplete="off" /><button type="button" aria-label={showApiKey ? "Ocultar API Key" : "Mostrar API Key"} className="absolute inset-y-0 right-0 grid w-10 place-items-center text-muted-foreground hover:text-foreground" onClick={() => setShowApiKey((value) => !value)}>{showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div><Button onClick={saveGoogleMapsApiKey}>Salvar</Button></div><p className="text-xs leading-5 text-muted-foreground">Usada pela prospecção para consultar o Google Places. A chave fica salva apenas neste navegador.</p></div>
           </CardContent>
         </Card>
-
-        <Card className="glass rounded-2xl">
-          <CardHeader className="border-b border-border/70 pb-3"><CardTitle className="flex items-center gap-2 text-sm"><MessageCircle className="size-4 text-primary" />WhatsApp</CardTitle></CardHeader>
-          <CardContent className="space-y-3 p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">Modo de registro</p><p className="mt-1 text-xs leading-5 text-muted-foreground">As mensagens ficam registradas no CRM. O conector externo ainda não está conectado.</p></div><Badge variant="outline" className="shrink-0 rounded-full">Não conectado</Badge></div><Button asChild variant="outline" className="w-full"><Link to="/whatsapp">Abrir WhatsApp</Link></Button></CardContent>
-        </Card>
       </div>
+
+      <WhatsappConnectionCard />
 
       <Card className="glass rounded-2xl">
         <CardHeader className="border-b border-border/70 pb-3"><CardTitle className="flex items-center gap-2 text-sm"><LockKeyhole className="size-4 text-primary" />Segurança</CardTitle></CardHeader>
