@@ -1,7 +1,7 @@
 /**
  * Camada de integração do WhatsApp.
  * A UI conhece somente este serviço; o provedor fica isolado aqui.
- * As chamadas à Z-API passam por server functions para evitar CORS no navegador.
+ * As chamadas externas passam por server functions para evitar CORS no navegador.
  */
 import { supabase } from "@/integrations/supabase/client";
 import { currentUserId } from "@/lib/session";
@@ -9,26 +9,29 @@ import { checkWhatsappConnection, sendWhatsappText } from "./whatsapp.functions"
 
 const CONFIG_STORAGE = "prospectflow.whatsapp";
 
+export type WhatsappProviderId = "z-api" | "w-api" | "evolution";
+
 export interface WhatsappConfig {
-  provider: "z-api";
+  provider: WhatsappProviderId;
   instanceId: string;
   token: string;
   clientToken: string;
+  baseUrl: string;
 }
 
 export interface ConnectionStatus {
   connected: boolean;
   phoneNumber: string | null;
-  provider: "z-api" | "none";
+  provider: WhatsappProviderId | "none";
 }
 
 export interface WhatsappProvider {
-  kind: "z-api";
+  kind: WhatsappProviderId;
   getConnectionStatus(): Promise<ConnectionStatus>;
   sendText(input: { phone: string; body: string }): Promise<{ providerMessageId: string | null }>;
 }
 
-const EMPTY_CONFIG: WhatsappConfig = { provider: "z-api", instanceId: "", token: "", clientToken: "" };
+const EMPTY_CONFIG: WhatsappConfig = { provider: "z-api", instanceId: "", token: "", clientToken: "", baseUrl: "" };
 
 export function getWhatsappConfig(): WhatsappConfig {
   if (typeof window === "undefined") return EMPTY_CONFIG;
@@ -45,16 +48,19 @@ export function saveWhatsappConfig(config: WhatsappConfig): void {
 }
 
 function ensureConfig(config: WhatsappConfig): void {
-  if (!config.instanceId.trim() || !config.token.trim()) throw new Error("Configure o ID da instância e o token da Z-API em Configurações → WhatsApp.");
+  if (!config.instanceId.trim() || !config.token.trim()) throw new Error("Informe o ID da instância e o token do provedor.");
+  if (config.provider === "evolution" && !config.baseUrl.trim()) throw new Error("Informe a URL da Evolution API.");
 }
 
-const zapiProvider: WhatsappProvider = {
+const providerAdapter: WhatsappProvider = {
   kind: "z-api",
   async getConnectionStatus() {
     const config = getWhatsappConfig();
-    if (!config.instanceId.trim() || !config.token.trim()) return { connected: false, phoneNumber: null, provider: "none" };
+    if (!config.instanceId.trim() || !config.token.trim() || (config.provider === "evolution" && !config.baseUrl.trim())) {
+      return { connected: false, phoneNumber: null, provider: "none" };
+    }
     const status = await checkWhatsappConnection({ data: config });
-    return { connected: status.connected, phoneNumber: status.phoneNumber, provider: "z-api" };
+    return { connected: status.connected, phoneNumber: status.phoneNumber, provider: config.provider };
   },
   async sendText({ phone, body }) {
     const config = getWhatsappConfig();
@@ -63,19 +69,19 @@ const zapiProvider: WhatsappProvider = {
   },
 };
 
-function getProvider(): WhatsappProvider {
-  return zapiProvider;
+export function getConfiguredProvider(): WhatsappProviderId {
+  return getWhatsappConfig().provider;
 }
 
 export async function testWhatsappConnection(config = getWhatsappConfig()): Promise<ConnectionStatus> {
   ensureConfig(config);
   const status = await checkWhatsappConnection({ data: config });
-  if (!status.connected) throw new Error("A Z-API respondeu, mas o WhatsApp ainda não está conectado à instância.");
-  return { connected: true, phoneNumber: status.phoneNumber, provider: "z-api" };
+  if (!status.connected) throw new Error(`${config.provider === "evolution" ? "Evolution API" : config.provider === "w-api" ? "W-API" : "Z-API"} respondeu, mas o WhatsApp não está conectado à instância.`);
+  return { connected: true, phoneNumber: status.phoneNumber, provider: config.provider };
 }
 
 export async function getConnectionStatus(): Promise<ConnectionStatus> {
-  return getProvider().getConnectionStatus();
+  return providerAdapter.getConnectionStatus();
 }
 
 export function renderTemplate(body: string, vars: { nome?: string | null; empresa?: string | null; cidade?: string | null; nicho?: string | null; cargo?: string | null }): string {
@@ -101,7 +107,7 @@ export async function sendMessage(params: { conversationId?: string; prospectId:
   const phone = prospect.whatsapp ?? prospect.phone;
   if (!phone) throw new Error("Este prospect não possui WhatsApp ou telefone.");
   const conversationId = params.conversationId ?? await ensureConversation(params.prospectId);
-  const providerResult = await getProvider().sendText({ phone, body });
+  const providerResult = await providerAdapter.sendText({ phone, body });
   const { error } = await supabase.from("whatsapp_messages").insert({ user_id: userId, conversation_id: conversationId, body, direction: "out", status: providerResult.providerMessageId ? "enviada" : "registrada_local" });
   if (error) throw error;
   await supabase.from("whatsapp_conversations").update({ last_message_preview: body, last_message_at: new Date().toISOString(), unread_count: 0 }).eq("id", conversationId);
