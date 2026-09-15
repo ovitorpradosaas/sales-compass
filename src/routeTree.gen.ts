@@ -17,6 +17,8 @@ import { Route as AuthenticatedIcpsRouteImport } from './routes/_authenticated/i
 import { Route as AuthenticatedPipelineRouteImport } from './routes/_authenticated/pipeline'
 import { Route as AuthenticatedProspeccaoRouteImport } from './routes/_authenticated/prospeccao'
 import { Route as AuthenticatedProspectsRouteImport } from './routes/_authenticated/prospects'
+import { Route as AuthenticatedWhatsappRouteImport } from './routes/_authenticated/whatsapp'
+import { Route as AuthenticatedSequenciasRouteImport } from './routes/_authenticated/sequencias'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -57,6 +59,16 @@ const AuthenticatedProspectsRoute = AuthenticatedProspectsRouteImport.update({
   path: '/prospects',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedWhatsappRoute = AuthenticatedWhatsappRouteImport.update({
+  id: '/whatsapp',
+  path: '/whatsapp',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedSequenciasRoute = AuthenticatedSequenciasRouteImport.update({
+  id: '/sequencias',
+  path: '/sequencias',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -66,6 +78,8 @@ export interface FileRoutesByFullPath {
   '/pipeline': typeof AuthenticatedPipelineRoute
   '/prospeccao': typeof AuthenticatedProspeccaoRoute
   '/prospects': typeof AuthenticatedProspectsRoute
+  '/whatsapp': typeof AuthenticatedWhatsappRoute
+  '/sequencias': typeof AuthenticatedSequenciasRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,6 +89,8 @@ export interface FileRoutesByTo {
   '/pipeline': typeof AuthenticatedPipelineRoute
   '/prospeccao': typeof AuthenticatedProspeccaoRoute
   '/prospects': typeof AuthenticatedProspectsRoute
+  '/whatsapp': typeof AuthenticatedWhatsappRoute
+  '/sequencias': typeof AuthenticatedSequenciasRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,6 +102,8 @@ export interface FileRoutesById {
   '/_authenticated/pipeline': typeof AuthenticatedPipelineRoute
   '/_authenticated/prospeccao': typeof AuthenticatedProspeccaoRoute
   '/_authenticated/prospects': typeof AuthenticatedProspectsRoute
+  '/_authenticated/whatsapp': typeof AuthenticatedWhatsappRoute
+  '/_authenticated/sequencias': typeof AuthenticatedSequenciasRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,6 +115,8 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/prospeccao'
     | '/prospects'
+    | '/whatsapp'
+    | '/sequencias'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -106,6 +126,8 @@ export interface FileRouteTypes {
     | '/pipeline'
     | '/prospeccao'
     | '/prospects'
+    | '/whatsapp'
+    | '/sequencias'
   id:
     | '__root__'
     | '/'
@@ -116,6 +138,8 @@ export interface FileRouteTypes {
     | '/_authenticated/pipeline'
     | '/_authenticated/prospeccao'
     | '/_authenticated/prospects'
+    | '/_authenticated/whatsapp'
+    | '/_authenticated/sequencias'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -182,6 +206,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedProspectsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/whatsapp': {
+      id: '/_authenticated/whatsapp'
+      path: '/whatsapp'
+      fullPath: '/whatsapp'
+      preLoaderRoute: typeof AuthenticatedWhatsappRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/sequencias': {
+      id: '/_authenticated/sequencias'
+      path: '/sequencias'
+      fullPath: '/sequencias'
+      preLoaderRoute: typeof AuthenticatedSequenciasRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
@@ -191,6 +229,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedPipelineRoute: typeof AuthenticatedPipelineRoute
   AuthenticatedProspeccaoRoute: typeof AuthenticatedProspeccaoRoute
   AuthenticatedProspectsRoute: typeof AuthenticatedProspectsRoute
+  AuthenticatedWhatsappRoute: typeof AuthenticatedWhatsappRoute
+  AuthenticatedSequenciasRoute: typeof AuthenticatedSequenciasRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -199,6 +239,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedPipelineRoute: AuthenticatedPipelineRoute,
   AuthenticatedProspeccaoRoute: AuthenticatedProspeccaoRoute,
   AuthenticatedProspectsRoute: AuthenticatedProspectsRoute,
+  AuthenticatedWhatsappRoute: AuthenticatedWhatsappRoute,
+  AuthenticatedSequenciasRoute: AuthenticatedSequenciasRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
