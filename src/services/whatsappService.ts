@@ -1,22 +1,95 @@
 /**
  * Camada de integração do WhatsApp.
  * A UI conhece somente este serviço; o provedor fica isolado aqui.
- * O adaptador atual é local e não dispara mensagens externas.
+ * Nesta versão, o conector externo é Z-API e pode ser configurado pelo painel.
  */
 import { supabase } from "@/integrations/supabase/client";
 import { currentUserId } from "@/lib/session";
 
-export interface ConnectionStatus { connected: boolean; phoneNumber: string | null; provider: "whatsapp_business_platform"; }
-export interface WhatsappProvider { kind: "local" | "whatsapp_business_platform"; getConnectionStatus(): Promise<ConnectionStatus>; sendText(input: { phone: string; body: string }): Promise<{ providerMessageId: string | null }>; }
+const CONFIG_STORAGE = "prospectflow.whatsapp";
 
-const localProvider: WhatsappProvider = {
-  kind: "local",
-  async getConnectionStatus() { return { connected: false, phoneNumber: null, provider: "whatsapp_business_platform" }; },
-  async sendText() { return { providerMessageId: null }; },
+export interface WhatsappConfig {
+  provider: "z-api";
+  instanceId: string;
+  token: string;
+  clientToken: string;
+}
+
+export interface ConnectionStatus {
+  connected: boolean;
+  phoneNumber: string | null;
+  provider: "z-api" | "none";
+}
+
+export interface WhatsappProvider {
+  kind: "z-api";
+  getConnectionStatus(): Promise<ConnectionStatus>;
+  sendText(input: { phone: string; body: string }): Promise<{ providerMessageId: string | null }>;
+}
+
+const EMPTY_CONFIG: WhatsappConfig = { provider: "z-api", instanceId: "", token: "", clientToken: "" };
+
+export function getWhatsappConfig(): WhatsappConfig {
+  if (typeof window === "undefined") return EMPTY_CONFIG;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CONFIG_STORAGE) ?? "null") as Partial<WhatsappConfig> | null;
+    return { ...EMPTY_CONFIG, ...parsed };
+  } catch {
+    return EMPTY_CONFIG;
+  }
+}
+
+export function saveWhatsappConfig(config: WhatsappConfig): void {
+  if (typeof window !== "undefined") window.localStorage.setItem(CONFIG_STORAGE, JSON.stringify(config));
+}
+
+function zapiHeaders(config: WhatsappConfig): HeadersInit {
+  return config.clientToken.trim() ? { "Content-Type": "application/json", "Client-Token": config.clientToken.trim() } : { "Content-Type": "application/json" };
+}
+
+function zapiBase(config: WhatsappConfig): string {
+  return `https://api.z-api.io/instances/${encodeURIComponent(config.instanceId.trim())}/token/${encodeURIComponent(config.token.trim())}`;
+}
+
+function ensureConfig(config: WhatsappConfig): void {
+  if (!config.instanceId.trim() || !config.token.trim()) throw new Error("Configure o ID da instância e o token da Z-API em Configurações → WhatsApp.");
+}
+
+const zapiProvider: WhatsappProvider = {
+  kind: "z-api",
+  async getConnectionStatus() {
+    const config = getWhatsappConfig();
+    if (!config.instanceId.trim() || !config.token.trim()) return { connected: false, phoneNumber: null, provider: "none" };
+    const response = await fetch(`${zapiBase(config)}/status`, { method: "GET", headers: zapiHeaders(config), signal: AbortSignal.timeout(8000) });
+    const payload = (await response.json().catch(() => ({}))) as { connected?: boolean; value?: boolean; phone?: string; phoneNumber?: string; error?: string; message?: string };
+    if (!response.ok) throw new Error(payload.message || payload.error || `Z-API retornou HTTP ${response.status}.`);
+    const connected = Boolean(payload.connected ?? payload.value);
+    return { connected, phoneNumber: payload.phoneNumber ?? payload.phone ?? null, provider: "z-api" };
+  },
+  async sendText({ phone, body }) {
+    const config = getWhatsappConfig();
+    ensureConfig(config);
+    const response = await fetch(`${zapiBase(config)}/send-text`, { method: "POST", headers: zapiHeaders(config), body: JSON.stringify({ phone: phone.replace(/\D/g, ""), message: body }), signal: AbortSignal.timeout(10000) });
+    const payload = (await response.json().catch(() => ({}))) as { zaapId?: string; messageId?: string; id?: string; error?: string; message?: string };
+    if (!response.ok) throw new Error(payload.message || payload.error || `Z-API retornou HTTP ${response.status}.`);
+    return { providerMessageId: payload.zaapId ?? payload.messageId ?? payload.id ?? null };
+  },
 };
 
-function getProvider(): WhatsappProvider { return localProvider; }
-export async function getConnectionStatus(): Promise<ConnectionStatus> { return getProvider().getConnectionStatus(); }
+function getProvider(): WhatsappProvider {
+  return zapiProvider;
+}
+
+export async function testWhatsappConnection(config = getWhatsappConfig()): Promise<ConnectionStatus> {
+  ensureConfig(config);
+  const status = await zapiProvider.getConnectionStatus();
+  if (!status.connected) throw new Error("A Z-API respondeu, mas o WhatsApp ainda não está conectado à instância.");
+  return status;
+}
+
+export async function getConnectionStatus(): Promise<ConnectionStatus> {
+  return getProvider().getConnectionStatus();
+}
 
 export function renderTemplate(body: string, vars: { nome?: string | null; empresa?: string | null; cidade?: string | null; nicho?: string | null; cargo?: string | null }): string {
   return body.replace(/\{\{\s*nome\s*\}\}/g, vars.nome ?? "").replace(/\{\{\s*empresa\s*\}\}/g, vars.empresa ?? "").replace(/\{\{\s*cidade\s*\}\}/g, vars.cidade ?? "").replace(/\{\{\s*nicho\s*\}\}/g, vars.nicho ?? "").replace(/\{\{\s*cargo\s*\}\}/g, vars.cargo ?? "");
