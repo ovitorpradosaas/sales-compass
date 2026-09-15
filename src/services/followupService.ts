@@ -16,14 +16,13 @@ export async function startSequence(params: { prospectId: string; sequenceId: st
 
   await supabase.from("scheduled_messages").update({ status: "cancelada" }).eq("user_id", userId).eq("prospect_id", params.prospectId).eq("sequence_id", params.sequenceId).eq("status", "agendada");
   let cursor = Date.now();
-  const rows = steps.map((step, index) => {
+  const rows = steps.map((step) => {
     cursor += Math.max(0, Number(step.delay_days) || 0) * 86400000;
     return { user_id: userId, prospect_id: params.prospectId, sequence_id: params.sequenceId, step_id: step.id, scheduled_at: new Date(cursor).toISOString(), status: "agendada", body: step.body };
   });
   const { error: insertError } = await supabase.from("scheduled_messages").insert(rows);
   if (insertError) throw insertError;
-  const first = rows[0];
-  await supabase.from("prospects").update({ status: "contatar", next_action: `Executar sequência: ${sequence.name}`, next_action_at: first?.scheduled_at ?? null }).eq("id", params.prospectId);
+  await supabase.from("prospects").update({ status: "contatar", next_action: `Executar sequência: ${sequence.name}`, next_action_at: rows[0]?.scheduled_at ?? null }).eq("id", params.prospectId);
   await supabase.from("activities").insert({ user_id: userId, prospect_id: params.prospectId, type: "sequencia_iniciada", description: `Sequência iniciada: ${sequence.name}.` });
   return rows.length;
 }
@@ -46,12 +45,9 @@ async function hasReplyAfterScheduled(prospectId: string, scheduledAt: string): 
 }
 
 async function updateNextAction(prospectId: string) {
-  const { data: pending } = await supabase.from("scheduled_messages").select("scheduled_at,sequence_id").eq("prospect_id", prospectId).eq("status", "agendada").order("scheduled_at", { ascending: true }).limit(1).maybeSingle();
-  if (pending) {
-    await supabase.from("prospects").update({ next_action: "Próximo follow-up da sequência", next_action_at: pending.scheduled_at }).eq("id", prospectId);
-  } else {
-    await supabase.from("prospects").update({ next_action: null, next_action_at: null }).eq("id", prospectId);
-  }
+  const { data: pending } = await supabase.from("scheduled_messages").select("scheduled_at").eq("prospect_id", prospectId).eq("status", "agendada").order("scheduled_at", { ascending: true }).limit(1).maybeSingle();
+  if (pending) await supabase.from("prospects").update({ next_action: "Próximo follow-up da sequência", next_action_at: pending.scheduled_at }).eq("id", prospectId);
+  else await supabase.from("prospects").update({ next_action: null, next_action_at: null }).eq("id", prospectId);
 }
 
 export async function processDueFollowups(limit = 50): Promise<number> {
@@ -59,7 +55,7 @@ export async function processDueFollowups(limit = 50): Promise<number> {
   const now = new Date().toISOString();
   const { data: due, error } = await supabase.from("scheduled_messages").select("id,prospect_id,sequence_id,scheduled_at,body,step_id").eq("user_id", userId).eq("status", "agendada").lte("scheduled_at", now).order("scheduled_at", { ascending: true }).limit(limit);
   if (error) throw error;
-  let sent = 0;
+  let processed = 0;
   for (const message of due ?? []) {
     const { data: sequence } = await supabase.from("sequences").select("id,name,status,stop_on_reply").eq("id", message.sequence_id ?? "").maybeSingle();
     if (!sequence || !["ativa", "active"].includes(sequence.status)) { await supabase.from("scheduled_messages").update({ status: "cancelada" }).eq("id", message.id); continue; }
@@ -68,10 +64,10 @@ export async function processDueFollowups(limit = 50): Promise<number> {
     if (!prospect || (!prospect.whatsapp && !prospect.phone)) { await supabase.from("scheduled_messages").update({ status: "cancelada" }).eq("id", message.id); await updateNextAction(message.prospect_id); continue; }
     const body = renderTemplate(message.body ?? "", { nome: prospect.contact_name, empresa: prospect.company, cidade: prospect.city, nicho: prospect.niche, cargo: prospect.contact_role });
     await sendMessage({ prospectId: message.prospect_id, body });
-    await supabase.from("scheduled_messages").update({ status: "enviada" }).eq("id", message.id);
-    await supabase.from("activities").insert({ user_id: userId, prospect_id: message.prospect_id, type: "followup_enviado", description: `Etapa ${message.step_id ?? ""} da sequência ${sequence.name} executada.` });
+    await supabase.from("scheduled_messages").update({ status: "registrada_local" }).eq("id", message.id);
+    await supabase.from("activities").insert({ user_id: userId, prospect_id: message.prospect_id, type: "followup_enviado", description: `Etapa ${message.step_id ?? ""} da sequência ${sequence.name} registrada no modo local.` });
     await updateNextAction(message.prospect_id);
-    sent += 1;
+    processed += 1;
   }
-  return sent;
+  return processed;
 }
