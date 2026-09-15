@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ListChecks, Play, Plus, Save, Trash2 } from "lucide-react";
+import { ListChecks, Play, Plus, Save, Trash2, Clock3 } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -14,84 +14,35 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useInvalidate, useProspects, useScheduledMessages, useSequenceSteps, useSequences } from "@/lib/queries";
 import { processDueFollowups, startSequence } from "@/services/followupService";
 
-export const Route = createFileRoute("/_authenticated/sequencias")({
-  head: () => ({ meta: [{ title: "Sequências — Sales Compass" }, { name: "robots", content: "noindex" }] }),
-  component: SequencesPage,
-});
+export const Route = createFileRoute("/_authenticated/sequencias")({ head: () => ({ meta: [{ title: "Sequências — ProspectFlow" }, { name: "robots", content: "noindex" }] }), component: SequencesPage });
 
 function SequencesPage() {
-  const invalidate = useInvalidate();
-  const { data: sequences = [] } = useSequences();
-  const { data: steps = [] } = useSequenceSteps();
-  const { data: prospects = [] } = useProspects();
-  const { data: scheduled = [] } = useScheduledMessages();
-  const [selectedId, setSelectedId] = useState<string>();
-  const [name, setName] = useState("");
-  const [stopOnReply, setStopOnReply] = useState(true);
-  const [prospectId, setProspectId] = useState("");
-  const [working, setWorking] = useState(false);
+  const invalidate = useInvalidate(); const { data: sequences = [] } = useSequences(); const { data: steps = [] } = useSequenceSteps(); const { data: prospects = [] } = useProspects(); const { data: scheduled = [] } = useScheduledMessages();
+  const [selectedId, setSelectedId] = useState<string>(); const [name, setName] = useState(""); const [stopOnReply, setStopOnReply] = useState(true); const [prospectId, setProspectId] = useState(""); const [working, setWorking] = useState(false);
   const selected = sequences.find((sequence) => sequence.id === selectedId) ?? sequences[0];
   const selectedSteps = useMemo(() => steps.filter((step) => step.sequence_id === selected?.id).sort((a, b) => a.position - b.position), [steps, selected?.id]);
   const selectedScheduled = useMemo(() => scheduled.filter((message) => message.sequence_id === selected?.id), [scheduled, selected?.id]);
+  const pendingCount = selectedScheduled.filter((m) => m.status === "pendente" || m.status === "agendada").length;
+  const sentCount = selectedScheduled.filter((m) => m.status === "enviada").length;
 
-  const createSequence = async () => {
-    if (!name.trim()) return;
-    const { data, error } = await supabase.from("sequences").insert({ name: name.trim(), status: "ativa", stop_on_reply: stopOnReply }).select("id").single();
-    if (error) { toast.error(error.message); return; }
-    setName(""); setSelectedId(data.id); invalidate(["sequences"]); toast.success("Sequência criada.");
-  };
-
-  const updateSequence = async (field: "name" | "stop_on_reply" | "status", value: string | boolean) => {
-    if (!selected) return;
-    const { error } = await supabase.from("sequences").update({ [field]: value }).eq("id", selected.id);
-    if (error) toast.error(error.message); else invalidate(["sequences"]);
-  };
-
-  const addStep = async () => {
-    if (!selected) return;
-    const nextPosition = selectedSteps.length ? Math.max(...selectedSteps.map((step) => step.position)) + 1 : 1;
-    const { error } = await supabase.from("sequence_steps").insert({ sequence_id: selected.id, position: nextPosition, delay_days: nextPosition === 1 ? 0 : 2, body: "Nova mensagem..." });
-    if (error) toast.error(error.message); else invalidate(["sequence_steps"]);
-  };
-
-  const updateStep = async (id: string, patch: { body?: string; delay_days?: number; position?: number }) => {
-    const { error } = await supabase.from("sequence_steps").update(patch).eq("id", id);
-    if (error) toast.error(error.message); else invalidate(["sequence_steps"]);
-  };
-
-  const removeStep = async (id: string) => {
-    const { error } = await supabase.from("sequence_steps").delete().eq("id", id);
-    if (error) { toast.error(error.message); return; }
-    invalidate(["sequence_steps"]);
-  };
-
-  const enroll = async () => {
-    if (!selected || !prospectId) return;
-    setWorking(true);
-    try { const count = await startSequence({ prospectId, sequenceId: selected.id }); invalidate(["scheduled_messages", "prospects", "activities"]); toast.success(`${count} etapa(s) agendada(s).`); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível iniciar a sequência."); }
-    finally { setWorking(false); }
-  };
-
-  const runDue = async () => {
-    setWorking(true);
-    try { const count = await processDueFollowups(); invalidate(["scheduled_messages", "prospects", "activities", "conversations", "messages"]); toast.success(`${count} mensagem(ns) processada(s).`); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Falha ao executar follow-ups."); }
-    finally { setWorking(false); }
-  };
+  const createSequence = async () => { if (!name.trim()) return; const { data, error } = await supabase.from("sequences").insert({ name: name.trim(), status: "ativa", stop_on_reply: stopOnReply }).select("id").single(); if (error) return void toast.error(error.message); setName(""); setSelectedId(data.id); invalidate(["sequences"]); toast.success("Sequência criada."); };
+  const updateSequence = async (field: "name" | "stop_on_reply" | "status", value: string | boolean) => { if (!selected) return; const { error } = await supabase.from("sequences").update({ [field]: value }).eq("id", selected.id); if (error) toast.error(error.message); else invalidate(["sequences"]); };
+  const addStep = async () => { if (!selected) return; const nextPosition = selectedSteps.length ? Math.max(...selectedSteps.map((step) => step.position)) + 1 : 1; const { error } = await supabase.from("sequence_steps").insert({ sequence_id: selected.id, position: nextPosition, delay_days: nextPosition === 1 ? 0 : 2, body: "Nova mensagem..." }); if (error) toast.error(error.message); else invalidate(["sequence_steps"]); };
+  const updateStep = async (id: string, patch: { body?: string; delay_days?: number; position?: number }) => { const { error } = await supabase.from("sequence_steps").update(patch).eq("id", id); if (error) toast.error(error.message); else invalidate(["sequence_steps"]); };
+  const removeStep = async (id: string) => { const { error } = await supabase.from("sequence_steps").delete().eq("id", id); if (error) toast.error(error.message); else invalidate(["sequence_steps"]); };
+  const enroll = async () => { if (!selected || !prospectId) return; setWorking(true); try { const count = await startSequence({ prospectId, sequenceId: selected.id }); invalidate(["scheduled_messages", "prospects", "activities"]); toast.success(`${count} etapa(s) agendada(s).`); } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível iniciar a sequência."); } finally { setWorking(false); } };
+  const runDue = async () => { setWorking(true); try { const count = await processDueFollowups(); invalidate(["scheduled_messages", "prospects", "activities", "conversations", "messages"]); toast.success(`${count} mensagem(ns) processada(s).`); } catch (error) { toast.error(error instanceof Error ? error.message : "Falha ao executar follow-ups."); } finally { setWorking(false); } };
 
   return <div className="space-y-6">
-    <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold">Sequências</h1><p className="mt-1 text-sm text-muted-foreground">Etapas → mensagens agendadas → execução. Respostas podem interromper automaticamente.</p></div><Button onClick={() => void runDue()} disabled={working}><Play className="mr-2 size-4" />Executar vencidas</Button></header>
-    <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-      <Card className="glass"><CardHeader><CardTitle className="text-base">Minhas sequências</CardTitle></CardHeader><CardContent className="space-y-3"><div className="space-y-2"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome da sequência" /><div className="flex items-center justify-between rounded-lg border p-2"><Label htmlFor="stop-reply" className="text-sm">Parar ao responder</Label><Switch id="stop-reply" checked={stopOnReply} onCheckedChange={setStopOnReply} /></div><Button className="w-full" size="sm" onClick={() => void createSequence()}><Plus className="mr-2 size-4" />Criar sequência</Button></div><div className="space-y-1">{sequences.map((sequence) => <button key={sequence.id} type="button" onClick={() => setSelectedId(sequence.id)} className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm ${selected?.id === sequence.id ? "bg-accent" : "hover:bg-accent/50"}`}><ListChecks className="size-4" /><span className="min-w-0 flex-1 truncate">{sequence.name}</span><Badge variant="outline">{sequence.status}</Badge></button>)}</div></CardContent></Card>
-      <div className="space-y-4">
-        {selected ? <>
-          <Card className="glass"><CardHeader><CardTitle className="text-base">Configuração</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2"><div className="space-y-1.5"><Label>Nome</Label><Input defaultValue={selected.name} onBlur={(e) => void updateSequence("name", e.target.value)} /></div><div className="flex items-center justify-between rounded-lg border p-3"><div><Label>Parar ao responder</Label><p className="text-xs text-muted-foreground">Cancela os próximos follow-ups quando chega uma resposta.</p></div><Switch checked={selected.stop_on_reply} onCheckedChange={(checked) => void updateSequence("stop_on_reply", checked)} /></div><div className="space-y-1.5"><Label>Status</Label><Select value={selected.status} onValueChange={(value) => void updateSequence("status", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ativa">Ativa</SelectItem><SelectItem value="pausada">Pausada</SelectItem><SelectItem value="arquivada">Arquivada</SelectItem></SelectContent></Select></div></CardContent></Card>
-          <Card className="glass"><CardHeader className="flex flex-row items-center justify-between"><CardTitle className="text-base">Etapas</CardTitle><Button size="sm" variant="outline" onClick={() => void addStep()}><Plus className="mr-2 size-4" />Adicionar etapa</Button></CardHeader><CardContent className="space-y-3">{selectedSteps.map((step, index) => <div key={step.id} className="rounded-xl border p-3"><div className="mb-2 flex items-center gap-2 text-sm font-medium"><Badge variant="outline">{index + 1}</Badge><span>Após {step.delay_days} dia(s)</span><Button className="ml-auto" size="icon" variant="ghost" onClick={() => void removeStep(step.id)} aria-label="Excluir etapa"><Trash2 className="size-4" /></Button></div><Textarea defaultValue={step.body} rows={3} onBlur={(e) => void updateStep(step.id, { body: e.target.value })} /><div className="mt-2 flex items-center gap-2"><Label className="text-xs text-muted-foreground">Delay desde a etapa anterior</Label><Input className="w-24" type="number" min={0} defaultValue={step.delay_days} onBlur={(e) => void updateStep(step.id, { delay_days: Number(e.target.value) || 0 })} /><Save className="size-4 text-muted-foreground" /></div></div>)}{selectedSteps.length === 0 && <p className="text-sm text-muted-foreground">Adicione a primeira etapa.</p>}</CardContent></Card>
-          <Card className="glass"><CardHeader><CardTitle className="text-base">Iniciar para um prospect</CardTitle></CardHeader><CardContent className="flex flex-col gap-3 md:flex-row md:items-end"><div className="flex-1 space-y-1.5"><Label>Prospect</Label><Select value={prospectId} onValueChange={setProspectId}><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger><SelectContent>{prospects.filter((p) => p.whatsapp || p.phone).map((p) => <SelectItem key={p.id} value={p.id}>{p.company} — {p.contact_name ?? "Sem contato"}</SelectItem>)}</SelectContent></Select></div><Button onClick={() => void enroll()} disabled={working || !prospectId}><Play className="mr-2 size-4" />Iniciar sequência</Button></CardContent></Card>
-          <Card className="glass"><CardHeader><CardTitle className="text-base">Mensagens agendadas</CardTitle></CardHeader><CardContent className="space-y-2">{selectedScheduled.map((message) => <div key={message.id} className="flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm"><Badge>{message.status}</Badge><span className="text-muted-foreground">{new Date(message.scheduled_at).toLocaleString("pt-BR")}</span><span className="min-w-0 flex-1 truncate">{message.body}</span></div>)}{selectedScheduled.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma mensagem agendada para esta sequência.</p>}</CardContent></Card>
-        </> : <Card className="glass"><CardContent className="py-20 text-center text-sm text-muted-foreground">Crie ou selecione uma sequência para começar.</CardContent></Card>}
-      </div>
+    <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[.16em] text-primary">Cadência comercial</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Sequências</h1><p className="mt-1.5 text-sm text-muted-foreground">Monte mensagens, escolha o intervalo e deixe o próximo passo organizado.</p></div><Button onClick={() => void runDue()} disabled={working} variant="outline"><Play className="mr-2 size-4" />Executar vencidas</Button></header>
+    <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <Card className="glass rounded-2xl"><CardHeader className="border-b border-border/70 pb-3"><CardTitle className="text-sm">Minhas sequências <span className="ml-1 text-muted-foreground">{sequences.length}</span></CardTitle></CardHeader><CardContent className="space-y-3 p-3"><div className="rounded-xl bg-muted/45 p-3"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome da sequência" className="h-9 bg-background" /><div className="mt-3 flex items-center justify-between gap-3"><Label htmlFor="stop-reply" className="text-xs">Parar quando responder</Label><Switch id="stop-reply" checked={stopOnReply} onCheckedChange={setStopOnReply} /></div><Button className="mt-3 w-full rounded-xl" size="sm" onClick={() => void createSequence()}><Plus className="mr-2 size-4" />Criar sequência</Button></div><div className="space-y-1">{sequences.map((sequence) => { const active = selected?.id === sequence.id; return <button key={sequence.id} type="button" onClick={() => setSelectedId(sequence.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-all ${active ? "bg-primary/10 ring-1 ring-primary/20" : "hover:bg-muted/70"}`}><span className={`grid size-8 place-items-center rounded-lg ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}><ListChecks className="size-4" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{sequence.name}</span><span className="mt-0.5 block text-[11px] text-muted-foreground">{sequence.stop_on_reply ? "Para ao responder" : "Continua após resposta"}</span></span><Badge variant={active ? "default" : "outline"} className="rounded-full text-[10px]">{sequence.status}</Badge></button>; })}</div></CardContent></Card>
+      <div className="space-y-4">{selected ? <>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><Card className="glass interactive-card"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Etapas</p><p className="mt-1 text-2xl font-semibold">{selectedSteps.length}</p></CardContent></Card><Card className="glass interactive-card"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Agendadas</p><p className="mt-1 text-2xl font-semibold">{pendingCount}</p></CardContent></Card><Card className="glass interactive-card col-span-2 sm:col-span-1"><CardContent className="p-4"><p className="text-xs text-muted-foreground">Enviadas</p><p className="mt-1 text-2xl font-semibold">{sentCount}</p></CardContent></Card></div>
+        <Card className="glass rounded-2xl"><CardHeader className="border-b border-border/70 pb-3"><CardTitle className="text-sm">Configuração</CardTitle></CardHeader><CardContent className="grid gap-4 p-4 md:grid-cols-2"><div className="space-y-1.5"><Label>Nome</Label><Input defaultValue={selected.name} onBlur={(e) => void updateSequence("name", e.target.value)} /></div><div className="flex items-center justify-between rounded-xl border border-border/70 bg-muted/20 p-3"><div><Label>Parar ao responder</Label><p className="mt-0.5 text-xs text-muted-foreground">Cancela os próximos envios quando chegar uma resposta.</p></div><Switch checked={selected.stop_on_reply} onCheckedChange={(checked) => void updateSequence("stop_on_reply", checked)} /></div><div className="space-y-1.5"><Label>Status</Label><Select value={selected.status} onValueChange={(value) => void updateSequence("status", value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ativa">Ativa</SelectItem><SelectItem value="pausada">Pausada</SelectItem><SelectItem value="arquivada">Arquivada</SelectItem></SelectContent></Select></div></CardContent></Card>
+        <Card className="glass rounded-2xl"><CardHeader className="flex flex-row items-center justify-between border-b border-border/70 pb-3"><div><CardTitle className="text-sm">Etapas da cadência</CardTitle><p className="mt-1 text-xs text-muted-foreground">Cada etapa é uma mensagem e seu intervalo.</p></div><Button size="sm" variant="outline" onClick={() => void addStep()}><Plus className="mr-2 size-4" />Adicionar</Button></CardHeader><CardContent className="space-y-3 p-4">{selectedSteps.map((step, index) => <div key={step.id} className="rounded-2xl border border-border/70 bg-background/55 p-4"><div className="flex items-center gap-3"><span className="grid size-8 place-items-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{index + 1}</span><div><p className="text-sm font-semibold">Etapa {index + 1}</p><p className="text-[11px] text-muted-foreground">{index === 0 ? "Primeiro contato" : `Após ${step.delay_days} dia(s)`}</p></div><Button className="ml-auto size-8" size="icon" variant="ghost" onClick={() => void removeStep(step.id)} aria-label="Excluir etapa"><Trash2 className="size-4 text-muted-foreground" /></Button></div><Textarea defaultValue={step.body} rows={4} onBlur={(e) => void updateStep(step.id, { body: e.target.value })} className="mt-3 resize-none" /><div className="mt-3 flex flex-wrap items-center gap-3"><div className="flex items-center gap-2"><Clock3 className="size-3.5 text-muted-foreground" /><Label className="text-xs text-muted-foreground">Intervalo</Label><Input className="h-8 w-20" type="number" min={0} defaultValue={step.delay_days} onBlur={(e) => void updateStep(step.id, { delay_days: Number(e.target.value) || 0 })} /><span className="text-xs text-muted-foreground">dias</span></div><Save className="size-4 text-muted-foreground/60" /></div></div>)}{!selectedSteps.length && <div className="rounded-xl border border-dashed p-8 text-center"><p className="text-sm font-medium">Sua sequência está vazia</p><p className="mt-1 text-xs text-muted-foreground">Adicione a primeira mensagem para começar.</p></div>}</CardContent></Card>
+        <div className="grid gap-4 xl:grid-cols-[1fr_1.15fr]"><Card className="glass rounded-2xl"><CardHeader className="border-b border-border/70 pb-3"><CardTitle className="text-sm">Iniciar para um prospect</CardTitle></CardHeader><CardContent className="space-y-3 p-4"><div className="space-y-1.5"><Label>Prospect</Label><Select value={prospectId} onValueChange={setProspectId}><SelectTrigger><SelectValue placeholder="Selecione um prospect" /></SelectTrigger><SelectContent>{prospects.filter((p) => p.whatsapp || p.phone).map((p) => <SelectItem key={p.id} value={p.id}>{p.company} — {p.contact_name ?? "Sem contato"}</SelectItem>)}</SelectContent></Select></div><Button className="w-full" onClick={() => void enroll()} disabled={working || !prospectId}><Play className="mr-2 size-4" />Iniciar sequência</Button></CardContent></Card><Card className="glass rounded-2xl"><CardHeader className="border-b border-border/70 pb-3"><CardTitle className="text-sm">Mensagens agendadas</CardTitle></CardHeader><CardContent className="space-y-2 p-4">{selectedScheduled.map((message) => <div key={message.id} className="flex items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-2.5"><Badge variant={message.status === "enviada" ? "secondary" : "outline"} className="rounded-full">{message.status}</Badge><span className="text-xs text-muted-foreground">{new Date(message.scheduled_at).toLocaleString("pt-BR")}</span><span className="min-w-0 flex-1 truncate text-sm">{message.body}</span></div>)}{!selectedScheduled.length && <p className="py-5 text-center text-sm text-muted-foreground">Nenhuma mensagem agendada.</p>}</CardContent></Card></div>
+      </> : <Card className="glass"><CardContent className="py-24 text-center"><ListChecks className="mx-auto size-10 text-primary/50" /><p className="mt-4 font-medium">Crie sua primeira sequência</p><p className="mt-1 text-sm text-muted-foreground">Monte a cadência e aplique-a aos prospects com WhatsApp.</p></CardContent></Card>}</div>
     </div>
   </div>;
 }
