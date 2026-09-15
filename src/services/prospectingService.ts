@@ -60,6 +60,7 @@ export function computeIcpScore(candidate: Omit<ProspectCandidate, "icp_score">,
 }
 
 export async function searchProspects(filters: ProspectFilters, criteria: IcpCriterion[]): Promise<ProspectCandidate[]> {
-  const candidates = await searchGooglePlaces({ data: filters });
+  const googleMapsApiKey = typeof window !== "undefined" ? window.localStorage.getItem("prospectflow.googleMapsApiKey") ?? "" : "";
+  const candidates = await searchGooglePlaces({ data: { ...filters, googleMapsApiKey } });
   return candidates.map((candidate) => ({ ...candidate, icp_score: computeIcpScore(candidate, filters, criteria) })).sort((a, b) => b.icp_score - a.icp_score);
 }
