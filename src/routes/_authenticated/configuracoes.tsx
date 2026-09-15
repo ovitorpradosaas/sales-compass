@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Check, LockKeyhole, LogOut, UserRound, MessageCircle } from "lucide-react";
+import { Check, Eye, EyeOff, KeyRound, LockKeyhole, LogOut, UserRound, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -15,16 +15,23 @@ export const Route = createFileRoute("/_authenticated/configuracoes")({
   component: SettingsPage,
 });
 
+const GOOGLE_MAPS_KEY_STORAGE = "prospectflow.googleMapsApiKey";
+
 function SettingsPage() {
   const { data: profile } = useProfile();
   const invalidate = useInvalidate();
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [googleMapsApiKey, setGoogleMapsApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
 
-  useEffect(() => setName(profile?.full_name ?? ""), [profile?.full_name]);
+  useEffect(() => {
+    setName(profile?.full_name ?? "");
+    setGoogleMapsApiKey(window.localStorage.getItem(GOOGLE_MAPS_KEY_STORAGE) ?? "");
+  }, [profile?.full_name]);
 
   async function saveName() {
     const next = name.trim();
@@ -46,6 +53,14 @@ function SettingsPage() {
     } finally {
       setSavingName(false);
     }
+  }
+
+  function saveGoogleMapsApiKey() {
+    const key = googleMapsApiKey.trim();
+    if (key) window.localStorage.setItem(GOOGLE_MAPS_KEY_STORAGE, key);
+    else window.localStorage.removeItem(GOOGLE_MAPS_KEY_STORAGE);
+    setGoogleMapsApiKey(key);
+    toast.success(key ? "API Key do Google Maps salva neste navegador." : "API Key removida.");
   }
 
   async function changePassword() {
@@ -84,6 +99,13 @@ function SettingsPage() {
           <CardContent className="space-y-5 p-5">
             <div className="flex items-center gap-3 rounded-2xl border border-border/70 bg-muted/25 p-4"><span className="grid size-11 place-items-center rounded-xl bg-primary/10 text-primary"><UserRound className="size-5" /></span><div className="min-w-0"><p className="truncate font-semibold">{profile?.full_name || "Minha conta"}</p><p className="truncate text-sm text-muted-foreground">{profile?.email ?? ""}</p></div></div>
             <div className="space-y-2"><Label htmlFor="profile-name">Nome</Label><div className="flex gap-2"><Input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome" /><Button onClick={() => void saveName()} disabled={savingName}>{savingName ? "Salvando..." : "Salvar"}</Button></div></div>
+          </CardContent>
+        </Card>
+
+        <Card className="glass rounded-2xl">
+          <CardHeader className="border-b border-border/70 pb-3"><CardTitle className="flex items-center gap-2 text-sm"><KeyRound className="size-4 text-primary" />Google Maps</CardTitle></CardHeader>
+          <CardContent className="space-y-3 p-5">
+            <div className="space-y-2"><Label htmlFor="google-maps-api-key">Google Maps API Key</Label><div className="flex gap-2"><div className="relative min-w-0 flex-1"><Input id="google-maps-api-key" type={showApiKey ? "text" : "password"} value={googleMapsApiKey} onChange={(e) => setGoogleMapsApiKey(e.target.value)} placeholder="Cole sua API Key aqui" className="pr-10" autoComplete="off" /><button type="button" aria-label={showApiKey ? "Ocultar API Key" : "Mostrar API Key"} className="absolute inset-y-0 right-0 grid w-10 place-items-center text-muted-foreground hover:text-foreground" onClick={() => setShowApiKey((value) => !value)}>{showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></div><Button onClick={saveGoogleMapsApiKey}>Salvar</Button></div><p className="text-xs leading-5 text-muted-foreground">Usada pela prospecção para consultar o Google Places. A chave fica salva apenas neste navegador.</p></div>
           </CardContent>
         </Card>
 
