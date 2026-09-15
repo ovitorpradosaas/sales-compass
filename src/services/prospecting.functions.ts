@@ -14,6 +14,7 @@ const ProspectFiltersSchema = z.object({
   employeesMin: z.number().nullable(), employeesMax: z.number().nullable(),
   requiresWebsite: z.boolean(), requiresInstagram: z.boolean(),
   qualificationRules: z.array(QualificationRuleSchema).default([]),
+  googleMapsApiKey: z.string().optional().default(""),
 });
 
 type ProspectFilters = z.infer<typeof ProspectFiltersSchema>;
@@ -65,7 +66,7 @@ async function searchOpenStreetMap(filters: ProspectFilters): Promise<GooglePros
 }
 
 export const searchGooglePlaces = createServerFn({ method: "POST" }).validator(ProspectFiltersSchema).handler(async ({ data }) => {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  const apiKey = data.googleMapsApiKey.trim() || process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) return searchOpenStreetMap(data);
 
   const candidates: GoogleProspectCandidate[] = []; const seen = new Set<string>(); let pageToken: string | undefined;
