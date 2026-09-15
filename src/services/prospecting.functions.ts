@@ -24,119 +24,57 @@ export interface GoogleProspectCandidate {
   website: string | null; instagram: string | null; phone: string | null; whatsapp: string | null;
   email: string | null; contact_name: string | null; contact_role: string | null;
   revenue: number | null; employees: number | null; keywordHit: boolean;
-  digitalSignals: DigitalSignals; source: "google_places";
+  digitalSignals: DigitalSignals; source: "google_places" | "openstreetmap";
 }
 
 const GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchText";
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const FIELD_MASK = ["places.id","places.displayName","places.formattedAddress","places.primaryTypeDisplayName","places.websiteUri","places.nationalPhoneNumber","places.internationalPhoneNumber","nextPageToken"].join(",");
 
-function normalize(value: string | null | undefined) {
-  return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-function parseAddress(address: string | undefined, filters: ProspectFilters) {
-  const parts = (address ?? "").split(",").map((part) => part.trim()).filter(Boolean);
-  return { city: filters.city.trim() || parts.at(-3) || parts.at(-2) || "", state: filters.state.trim() || extractBrazilianState(parts) };
-}
+function normalize(value: string | null | undefined) { return (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim(); }
+function parseAddress(address: string | undefined, filters: ProspectFilters) { const parts = (address ?? "").split(",").map((part) => part.trim()).filter(Boolean); return { city: filters.city.trim() || parts.at(-3) || parts.at(-2) || "", state: filters.state.trim() || extractBrazilianState(parts) }; }
 function extractBrazilianState(parts: string[]) { return parts.find((p) => /\b[A-Z]{2}\b/.test(p))?.match(/\b([A-Z]{2})\b/)?.[1] ?? ""; }
-function buildTextQuery(filters: ProspectFilters) {
-  const niche = filters.niche.trim();
-  const keywords = filters.keywords.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 3).join(" ");
-  const location = [filters.city.trim(), filters.state.trim(), "Brasil"].filter(Boolean).join(", ");
-  const query = [niche || "empresas", keywords].filter(Boolean).join(" ");
-  return location ? `${query} em ${location}` : `${query} no Brasil`;
-}
-function extractInstagram(html: string, baseUrl: string) {
-  const matches = html.match(/https?:\/\/(?:www\.)?instagram\.com\/[A-Za-z0-9._-]+\/?/gi) ?? [];
-  const url = matches.find((value) => !/instagram\.com\/(?:p|reel|reels|stories|explore|accounts)\//i.test(value));
-  if (!url) return null;
-  try { return new URL(url, baseUrl).toString().replace(/\/$/, ""); } catch { return null; }
-}
-function extractLandingPageSignal(html: string, url: string) {
-  const text = normalize(html); const path = normalize(new URL(url).pathname);
-  return /(^|\/)(lp|landing|landing-page|captura|oferta|produto)(\/|$)/i.test(path) || (/<form\b/i.test(html) && /(fale conosco|agende|orcamento|solicite|quero saber|entre em contato|compre agora|saiba mais)/i.test(text));
-}
-async function inspectWebsite(website: string | null) {
-  if (!website) return { instagram: null, landing_page: false };
-  try {
-    const response = await fetch(website, { headers: { "User-Agent": "Mozilla/5.0 SalesCompass/1.0" }, signal: AbortSignal.timeout(2500), redirect: "follow" });
-    if (!response.ok || !(response.headers.get("content-type") ?? "").includes("text/html")) return { instagram: null, landing_page: null };
-    const html = await response.text();
-    return { instagram: extractInstagram(html, response.url || website), landing_page: extractLandingPageSignal(html, response.url || website) };
-  } catch { return { instagram: null, landing_page: null }; }
-}
-function matchesRule(candidate: GoogleProspectCandidate, rule: z.infer<typeof QualificationRuleSchema>) {
-  const value = candidate.digitalSignals[rule.signal];
-  if (value == null) return rule.mode !== "required";
-  return rule.operator === "has" ? value : !value;
-}
-async function fetchGooglePage(apiKey: string, filters: ProspectFilters, pageToken?: string) {
-  const body: Record<string, unknown> = { textQuery: buildTextQuery(filters), pageSize: 20, languageCode: "pt-BR", regionCode: "BR" };
-  if (pageToken) body.pageToken = pageToken;
-  const response = await fetch(GOOGLE_PLACES_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
-  const payload = (await response.json()) as { places?: Array<{ id?: string; displayName?: { text?: string }; formattedAddress?: string; primaryTypeDisplayName?: { text?: string }; websiteUri?: string; nationalPhoneNumber?: string; internationalPhoneNumber?: string }>; nextPageToken?: string; error?: { message?: string } };
-  if (!response.ok) throw new Error(payload.error?.message || `Google Places retornou HTTP ${response.status}.`);
-  return payload;
-}
+function buildTextQuery(filters: ProspectFilters) { const niche = filters.niche.trim(); const keywords = filters.keywords.split(",").map((k) => k.trim()).filter(Boolean).slice(0, 3).join(" "); const location = [filters.city.trim(), filters.state.trim(), "Brasil"].filter(Boolean).join(", "); const query = [niche || "empresas", keywords].filter(Boolean).join(" "); return location ? `${query} em ${location}` : `${query} no Brasil`; }
+function extractInstagram(html: string, baseUrl: string) { const matches = html.match(/https?:\/\/(?:www\.)?instagram\.com\/[A-Za-z0-9._-]+\/?/gi) ?? []; const url = matches.find((value) => !/instagram\.com\/(?:p|reel|reels|stories|explore|accounts)\//i.test(value)); if (!url) return null; try { return new URL(url, baseUrl).toString().replace(/\/$/, ""); } catch { return null; } }
+function extractLandingPageSignal(html: string, url: string) { const text = normalize(html); const path = normalize(new URL(url).pathname); return /(^|\/)(lp|landing|landing-page|captura|oferta|produto)(\/|$)/i.test(path) || (/<form\b/i.test(html) && /(fale conosco|agende|orcamento|solicite|quero saber|entre em contato|compre agora|saiba mais)/i.test(text)); }
+async function inspectWebsite(website: string | null) { if (!website) return { instagram: null, landing_page: false }; try { const response = await fetch(website, { headers: { "User-Agent": "Mozilla/5.0 SalesCompass/1.0" }, signal: AbortSignal.timeout(2500), redirect: "follow" }); if (!response.ok || !(response.headers.get("content-type") ?? "").includes("text/html")) return { instagram: null, landing_page: null }; const html = await response.text(); return { instagram: extractInstagram(html, response.url || website), landing_page: extractLandingPageSignal(html, response.url || website) }; } catch { return { instagram: null, landing_page: null }; } }
+function matchesRule(candidate: GoogleProspectCandidate, rule: z.infer<typeof QualificationRuleSchema>) { const value = candidate.digitalSignals[rule.signal]; if (value == null) return rule.mode !== "required"; return rule.operator === "has" ? value : !value; }
+async function mapWithConcurrency<T, R>(items: T[], worker: (item: T) => Promise<R>, concurrency = 8) { const results = new Array<R>(items.length); let cursor = 0; const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => { while (true) { const index = cursor++; if (index >= items.length) return; results[index] = await worker(items[index]); } }); await Promise.all(runners); return results; }
 
-async function mapWithConcurrency<T, R>(items: T[], worker: (item: T) => Promise<R>, concurrency = 8) {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (true) {
-      const index = cursor++;
-      if (index >= items.length) return;
-      results[index] = await worker(items[index]);
-    }
-  });
-  await Promise.all(runners);
-  return results;
+async function fetchGooglePage(apiKey: string, filters: ProspectFilters, pageToken?: string) { const body: Record<string, unknown> = { textQuery: buildTextQuery(filters), pageSize: 20, languageCode: "pt-BR", regionCode: "BR" }; if (pageToken) body.pageToken = pageToken; const response = await fetch(GOOGLE_PLACES_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) }); const payload = (await response.json()) as { places?: Array<{ id?: string; displayName?: { text?: string }; formattedAddress?: string; primaryTypeDisplayName?: { text?: string }; websiteUri?: string; nationalPhoneNumber?: string; internationalPhoneNumber?: string }>; nextPageToken?: string; error?: { message?: string } }; if (!response.ok) throw new Error(payload.error?.message || `Google Places retornou HTTP ${response.status}.`); return payload; }
+
+async function searchOpenStreetMap(filters: ProspectFilters): Promise<GoogleProspectCandidate[]> {
+  const location = [filters.city.trim(), filters.state.trim(), "Brasil"].filter(Boolean).join(", ");
+  const query = [filters.niche.trim() || "empresa", filters.keywords.trim()].filter(Boolean).join(" ");
+  const geoResponse = await fetch(`${NOMINATIM_URL}?format=jsonv2&limit=1&countrycodes=br&q=${encodeURIComponent(location)}`, { headers: { "User-Agent": "SalesCompass/1.0 (prospecting MVP)" }, signal: AbortSignal.timeout(5000) });
+  if (!geoResponse.ok) throw new Error("Não foi possível localizar a região informada.");
+  const geo = (await geoResponse.json()) as Array<{ lat: string; lon: string }>;
+  if (!geo[0]) throw new Error("Não foi possível localizar a cidade informada.");
+  const lat = Number(geo[0].lat); const lon = Number(geo[0].lon); const radius = 15000;
+  const overpassQuery = `[out:json][timeout:20];(nwr["name"]["shop"](around:${radius},${lat},${lon});nwr["name"]["office"](around:${radius},${lat},${lon});nwr["name"]["amenity"](around:${radius},${lat},${lon});nwr["name"]["healthcare"](around:${radius},${lat},${lon}););out tags center;`;
+  const response = await fetch(OVERPASS_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "SalesCompass/1.0" }, body: `data=${encodeURIComponent(overpassQuery)}`, signal: AbortSignal.timeout(25000) });
+  if (!response.ok) throw new Error(`Fonte alternativa retornou HTTP ${response.status}.`);
+  const payload = (await response.json()) as { elements?: Array<{ id: number; type: string; tags?: Record<string, string> }> };
+  const normalizedTerms = normalize(query).split(/\s+/).filter(Boolean);
+  const elements = (payload.elements ?? []).filter((element) => { const tags = element.tags ?? {}; const haystack = normalize([tags.name, tags["official_name"], tags.brand, tags["healthcare:speciality"], tags.shop, tags.amenity].filter(Boolean).join(" ")); return !normalizedTerms.length || normalizedTerms.some((term) => haystack.includes(term)); }).slice(0, 40);
+  return mapWithConcurrency(elements, async (element) => {
+    const tags = element.tags ?? {}; const website = tags.website || tags["contact:website"] || null; const phone = tags.phone || tags["contact:phone"] || null; const instagram = tags["contact:instagram"] || null; const city = tags["addr:city"] || filters.city.trim(); const state = tags["addr:state"] || filters.state.trim(); const web = website && !instagram ? await inspectWebsite(website) : { instagram, landing_page: false };
+    return { externalId: `osm:${element.type}:${element.id}`, company: tags.name || "Empresa sem nome", niche: filters.niche.trim() || tags.amenity || tags.shop || "Empresa", city, state, website, instagram: instagram || web.instagram, phone, whatsapp: phone, email: tags.email || tags["contact:email"] || null, contact_name: null, contact_role: null, revenue: null, employees: null, keywordHit: true, digitalSignals: { website: Boolean(website), landing_page: web.landing_page, instagram: Boolean(instagram || web.instagram), meta_ads: null, google_ads: null }, source: "openstreetmap" as const } satisfies GoogleProspectCandidate;
+  }, 6);
 }
 
 export const searchGooglePlaces = createServerFn({ method: "POST" }).validator(ProspectFiltersSchema).handler(async ({ data }) => {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) throw new Error("A prospecção ainda não está configurada: falta GOOGLE_MAPS_API_KEY no ambiente do servidor.");
+  if (!apiKey) return searchOpenStreetMap(data);
 
-  const candidates: GoogleProspectCandidate[] = [];
-  const seen = new Set<string>();
-  let pageToken: string | undefined;
-
-  // Two pages give up to 40 companies while keeping the first search responsive.
+  const candidates: GoogleProspectCandidate[] = []; const seen = new Set<string>(); let pageToken: string | undefined;
   for (let page = 0; page < 2; page += 1) {
-    const result = await fetchGooglePage(apiKey, data, pageToken);
-    const places = (result.places ?? []).filter((place) => place.id && !seen.has(place.id));
-    places.forEach((place) => seen.add(place.id!));
-
-    const baseCandidates = places.map((place) => {
-      const company = place.displayName?.text?.trim() || "Empresa sem nome";
-      const address = parseAddress(place.formattedAddress, data);
-      const niche = place.primaryTypeDisplayName?.text?.trim() || data.niche.trim() || "Empresa";
-      const phone = place.internationalPhoneNumber || place.nationalPhoneNumber || null;
-      const keywords = data.keywords.split(",").map(normalize).filter(Boolean);
-      return { place, company, address, niche, phone, keywords };
-    }).filter(({ place }) => !data.requiresWebsite || Boolean(place.websiteUri));
-
-    const enriched = await mapWithConcurrency(baseCandidates, async ({ place, company, address, niche, phone, keywords }) => {
-      const web = await inspectWebsite(place.websiteUri ?? null);
-      return {
-        externalId: place.id!, company, niche, city: address.city, state: address.state,
-        website: place.websiteUri ?? null, instagram: web.instagram, phone, whatsapp: phone,
-        email: null, contact_name: null, contact_role: null, revenue: null, employees: null,
-        keywordHit: keywords.length > 0 && keywords.some((keyword) => normalize(`${company} ${niche}`).includes(keyword)),
-        digitalSignals: { website: Boolean(place.websiteUri), landing_page: web.landing_page, instagram: Boolean(web.instagram), meta_ads: null, google_ads: null },
-        source: "google_places" as const,
-      } satisfies GoogleProspectCandidate;
-    }, 8);
-
-    const requiredRules = data.qualificationRules.filter((rule) => rule.mode === "required");
-    for (const candidate of enriched) {
-      if (data.requiresInstagram && !candidate.instagram) continue;
-      if (requiredRules.some((rule) => !matchesRule(candidate, rule))) continue;
-      candidates.push(candidate);
-    }
-
-    if (!result.nextPageToken || candidates.length >= 40) break;
-    pageToken = result.nextPageToken;
+    const result = await fetchGooglePage(apiKey, data, pageToken); const places = (result.places ?? []).filter((place) => place.id && !seen.has(place.id)); places.forEach((place) => seen.add(place.id!));
+    const baseCandidates = places.map((place) => { const company = place.displayName?.text?.trim() || "Empresa sem nome"; const address = parseAddress(place.formattedAddress, data); const niche = place.primaryTypeDisplayName?.text?.trim() || data.niche.trim() || "Empresa"; const phone = place.internationalPhoneNumber || place.nationalPhoneNumber || null; const keywords = data.keywords.split(",").map(normalize).filter(Boolean); return { place, company, address, niche, phone, keywords }; }).filter(({ place }) => !data.requiresWebsite || Boolean(place.websiteUri));
+    const enriched = await mapWithConcurrency(baseCandidates, async ({ place, company, address, niche, phone, keywords }) => { const web = await inspectWebsite(place.websiteUri ?? null); return { externalId: place.id!, company, niche, city: address.city, state: address.state, website: place.websiteUri ?? null, instagram: web.instagram, phone, whatsapp: phone, email: null, contact_name: null, contact_role: null, revenue: null, employees: null, keywordHit: keywords.length > 0 && keywords.some((keyword) => normalize(`${company} ${niche}`).includes(keyword)), digitalSignals: { website: Boolean(place.websiteUri), landing_page: web.landing_page, instagram: Boolean(web.instagram), meta_ads: null, google_ads: null }, source: "google_places" as const } satisfies GoogleProspectCandidate; }, 8);
+    const requiredRules = data.qualificationRules.filter((rule) => rule.mode === "required"); for (const candidate of enriched) { if (data.requiresInstagram && !candidate.instagram) continue; if (requiredRules.some((rule) => !matchesRule(candidate, rule))) continue; candidates.push(candidate); }
+    if (!result.nextPageToken || candidates.length >= 40) break; pageToken = result.nextPageToken;
   }
-
   return candidates.slice(0, 40);
 });
