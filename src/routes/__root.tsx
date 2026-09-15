@@ -6,6 +6,7 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { Toaster } from "sonner";
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
@@ -64,5 +65,5 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  return <QueryClientProvider client={queryClient}><Outlet /></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><Outlet /><Toaster position="bottom-right" richColors closeButton /></QueryClientProvider>;
 }
