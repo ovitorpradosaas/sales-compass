@@ -58,7 +58,7 @@ function extractLandingPageSignal(html: string, url: string) {
 async function inspectWebsite(website: string | null) {
   if (!website) return { instagram: null, landing_page: false };
   try {
-    const response = await fetch(website, { headers: { "User-Agent": "Mozilla/5.0 SalesCompass/1.0" }, signal: AbortSignal.timeout(3500), redirect: "follow" });
+    const response = await fetch(website, { headers: { "User-Agent": "Mozilla/5.0 SalesCompass/1.0" }, signal: AbortSignal.timeout(2500), redirect: "follow" });
     if (!response.ok || !(response.headers.get("content-type") ?? "").includes("text/html")) return { instagram: null, landing_page: null };
     const html = await response.text();
     return { instagram: extractInstagram(html, response.url || website), landing_page: extractLandingPageSignal(html, response.url || website) };
@@ -72,41 +72,71 @@ function matchesRule(candidate: GoogleProspectCandidate, rule: z.infer<typeof Qu
 async function fetchGooglePage(apiKey: string, filters: ProspectFilters, pageToken?: string) {
   const body: Record<string, unknown> = { textQuery: buildTextQuery(filters), pageSize: 20, languageCode: "pt-BR", regionCode: "BR" };
   if (pageToken) body.pageToken = pageToken;
-  const response = await fetch(GOOGLE_PLACES_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK }, body: JSON.stringify(body) });
+  const response = await fetch(GOOGLE_PLACES_URL, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey, "X-Goog-FieldMask": FIELD_MASK }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
   const payload = (await response.json()) as { places?: Array<{ id?: string; displayName?: { text?: string }; formattedAddress?: string; primaryTypeDisplayName?: { text?: string }; websiteUri?: string; nationalPhoneNumber?: string; internationalPhoneNumber?: string }>; nextPageToken?: string; error?: { message?: string } };
   if (!response.ok) throw new Error(payload.error?.message || `Google Places retornou HTTP ${response.status}.`);
   return payload;
 }
 
+async function mapWithConcurrency<T, R>(items: T[], worker: (item: T) => Promise<R>, concurrency = 8) {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 export const searchGooglePlaces = createServerFn({ method: "POST" }).validator(ProspectFiltersSchema).handler(async ({ data }) => {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) throw new Error("Google Places não está configurado. Defina GOOGLE_MAPS_API_KEY no ambiente do servidor.");
-  const candidates: GoogleProspectCandidate[] = []; const seen = new Set<string>(); let pageToken: string | undefined;
-  for (let page = 0; page < 3; page += 1) {
+  if (!apiKey) throw new Error("A prospecção ainda não está configurada: falta GOOGLE_MAPS_API_KEY no ambiente do servidor.");
+
+  const candidates: GoogleProspectCandidate[] = [];
+  const seen = new Set<string>();
+  let pageToken: string | undefined;
+
+  // Two pages give up to 40 companies while keeping the first search responsive.
+  for (let page = 0; page < 2; page += 1) {
     const result = await fetchGooglePage(apiKey, data, pageToken);
-    for (const place of result.places ?? []) {
-      if (!place.id || seen.has(place.id)) continue; seen.add(place.id);
+    const places = (result.places ?? []).filter((place) => place.id && !seen.has(place.id));
+    places.forEach((place) => seen.add(place.id!));
+
+    const baseCandidates = places.map((place) => {
       const company = place.displayName?.text?.trim() || "Empresa sem nome";
       const address = parseAddress(place.formattedAddress, data);
       const niche = place.primaryTypeDisplayName?.text?.trim() || data.niche.trim() || "Empresa";
       const phone = place.internationalPhoneNumber || place.nationalPhoneNumber || null;
       const keywords = data.keywords.split(",").map(normalize).filter(Boolean);
-      if (data.requiresWebsite && !place.websiteUri) continue;
+      return { place, company, address, niche, phone, keywords };
+    }).filter(({ place }) => !data.requiresWebsite || Boolean(place.websiteUri));
+
+    const enriched = await mapWithConcurrency(baseCandidates, async ({ place, company, address, niche, phone, keywords }) => {
       const web = await inspectWebsite(place.websiteUri ?? null);
-      if (data.requiresInstagram && !web.instagram) continue;
-      const candidate: GoogleProspectCandidate = {
-        externalId: place.id, company, niche, city: address.city, state: address.state,
+      return {
+        externalId: place.id!, company, niche, city: address.city, state: address.state,
         website: place.websiteUri ?? null, instagram: web.instagram, phone, whatsapp: phone,
         email: null, contact_name: null, contact_role: null, revenue: null, employees: null,
         keywordHit: keywords.length > 0 && keywords.some((keyword) => normalize(`${company} ${niche}`).includes(keyword)),
         digitalSignals: { website: Boolean(place.websiteUri), landing_page: web.landing_page, instagram: Boolean(web.instagram), meta_ads: null, google_ads: null },
-        source: "google_places",
-      };
-      const requiredRules = data.qualificationRules.filter((rule) => rule.mode === "required");
+        source: "google_places" as const,
+      } satisfies GoogleProspectCandidate;
+    }, 8);
+
+    const requiredRules = data.qualificationRules.filter((rule) => rule.mode === "required");
+    for (const candidate of enriched) {
+      if (data.requiresInstagram && !candidate.instagram) continue;
       if (requiredRules.some((rule) => !matchesRule(candidate, rule))) continue;
       candidates.push(candidate);
     }
-    if (!result.nextPageToken || candidates.length >= 60) break; pageToken = result.nextPageToken;
+
+    if (!result.nextPageToken || candidates.length >= 40) break;
+    pageToken = result.nextPageToken;
   }
-  return candidates.slice(0, 60);
+
+  return candidates.slice(0, 40);
 });
