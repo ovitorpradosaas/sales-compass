@@ -47,6 +47,12 @@ function providerError(provider: string, response: Response, payload: Record<str
   return String(payload.message ?? payload.error ?? payload.response ?? `${provider} retornou HTTP ${response.status}.`);
 }
 
+function responseMessageId(payload: Record<string, unknown>): string | null {
+  const key = payload.key;
+  const keyId = key && typeof key === "object" && "id" in key ? String((key as { id?: unknown }).id ?? "") : "";
+  return String(payload.zaapId ?? payload.messageId ?? payload.insertedId ?? keyId ?? payload.id ?? "") || null;
+}
+
 export const checkWhatsappConnection = createServerFn({ method: "POST" }).validator(ConfigSchema).handler(async ({ data }) => {
   let response: Response;
   if (data.provider === "z-api") {
@@ -94,5 +100,5 @@ export const sendWhatsappText = createServerFn({ method: "POST" }).validator(Sen
   const response = await fetch(url, { method: "POST", headers: headers(data), body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
   const payload = await parse(response);
   if (!response.ok) throw new Error(providerError(data.provider, response, payload));
-  return { providerMessageId: String(payload.zaapId ?? payload.messageId ?? payload.insertedId ?? payload.key?.id ?? payload.id ?? "") || null };
+  return { providerMessageId: responseMessageId(payload) };
 });
